@@ -15,7 +15,8 @@ services:
         generateValue: true
       - key: CORS_ORIGIN
         value: "*"
-
+ 
 databases:
   - name: prevencion-riesgos-db-pehuen
-    plan: free
+    plan: basic-256mb
+ 
