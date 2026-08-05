@@ -1,3 +1,127 @@
+node_modules/
+.env
+*.log
+
+{
+  "name": "prevencion-riesgos-api-pehuen",
+  "version": "1.0.0",
+  "description": "Backend real (API + autenticacion) para la app de Prevencion de Riesgos de Pehuen.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "pg": "^8.11.5"
+  },
+  "license": "UNLICENSED",
+  "private": true
+}
+
+# Backend — Sistema de Gestión Prevención de Riesgos (Pehuén)
+
+API real (Node.js + PostgreSQL) que reemplaza el almacenamiento local
+(IndexedDB) de la app por una base de datos compartida, con
+autenticación real.
+
+## Requisitos
+- Cuenta gratuita en [Render](https://render.com/) (puedes crearla con tu cuenta de GitHub).
+- Repositorio en GitHub con este contenido.
+
+## Despliegue en Render (recomendado: Blueprint)
+1. Sube el contenido de esta carpeta a un repositorio nuevo en GitHub.
+2. En Render, click "New" → "Blueprint" y selecciona ese repositorio.
+   Render detecta automáticamente `render.yaml` y crea:
+   - Un Web Service (`prevencion-riesgos-api-pehuen`) con Node.js.
+   - Una base de datos PostgreSQL (`prevencion-riesgos-db-pehuen`).
+   - La variable `DATABASE_URL` conectada automáticamente a esa base de datos.
+   - La variable `JWT_SECRET` generada automáticamente (clave para firmar las sesiones).
+3. Después del primer despliegue, entra a la variable de entorno `CORS_ORIGIN`
+   del servicio y cámbiala de `"*"` a la dirección exacta de tu sitio
+   (por ejemplo `https://tu-sitio.netlify.app`), para que solo tu sitio
+   pueda usar esta API.
+4. Copia la URL pública que te da Render para el servicio (algo como
+   `https://prevencion-riesgos-api-pehuen.onrender.com`).
+
+## Conectar la app (app.html) a este backend
+Abre `app.html`, busca la línea:
+```js
+const API_BASE_URL = "";
+```
+y reemplázala por tu URL de Render:
+```js
+const API_BASE_URL = "https://prevencion-riesgos-api-pehuen.onrender.com";
+```
+Vuelve a subir ese archivo a tu hosting estático (Netlify/Vercel/etc.).
+Si dejas `API_BASE_URL` vacío, la app sigue funcionando exactamente
+igual que antes (sin backend, guardando todo solo en el navegador).
+
+## Primer ingreso
+La primera vez que el servidor arranca con una base de datos vacía,
+crea automáticamente:
+- Usuario: **Administrador del sistema**
+- Clave: **admin123**
+
+Cambia esta clave (o crea tu usuario real y elimina este) desde
+Configuración → Gestión de accesos apenas entres, ya que es una
+credencial pública documentada aquí.
+
+## Notas técnicas
+- Sin dependencias externas más allá de `pg` (cliente de PostgreSQL):
+  el servidor usa los módulos nativos `http` y `crypto` de Node, sin
+  Express/bcrypt/jsonwebtoken, para mantenerlo simple y fácil de auditar.
+- Un único modelo de datos genérico (tabla `records`, columnas
+  `store` + `id` + `data JSONB`) que refleja los mismos "stores" que
+  la app ya usaba en IndexedDB — no requiere rediseñar el modelo de
+  datos de la app.
+- Las claves de usuario se guardan con hash (scrypt), nunca en texto
+  plano, y nunca se devuelven al navegador.
+- **Limitación conocida:** cualquier usuario autenticado (con sesión
+  válida) puede leer/escribir cualquier módulo vía la API; el control
+  de qué pestañas ve cada perfil sigue siendo solo de interfaz, igual
+  que en el prototipo original. Para restringir por rol también a
+  nivel de servidor, se requeriría una fase adicional de desarrollo.
+
+services:
+  - type: web
+    name: prevencion-riesgos-api-pehuen
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: prevencion-riesgos-db-pehuen
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: CORS_ORIGIN
+        value: "*"
+      - key: ANTHROPIC_API_KEY
+        sync: false
+
+databases:
+  - name: prevencion-riesgos-db-pehuen
+    plan: basic-256mb
+
+-- Esquema minimo: una sola tabla generica que refleja exactamente los
+-- "stores" que la app ya usaba en IndexedDB (cada fila = un registro de
+-- negocio, identificado por store+id, con el objeto completo en JSONB).
+-- Esto permite migrar sin rediseñar el modelo de datos de la app.
+CREATE TABLE IF NOT EXISTS records (
+  store TEXT NOT NULL,
+  id TEXT NOT NULL,
+  data JSONB NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (store, id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_records_store ON records(store);
+
 /*
  * Backend real para la app "Sistema de Gestión Prevención de Riesgos"
  * (Pehuén). Reemplaza el almacenamiento local (IndexedDB) por una
@@ -180,6 +304,71 @@ async function dbClearStore(store) {
   await pool.query("DELETE FROM records WHERE store = $1", [store]);
 }
 
+// ---------- redacción automática de documentos con IA (v1.74) ----------
+// Usa la API de mensajes de Anthropic (Claude) para redactar un borrador de
+// política, procedimiento o manual, dando como contexto los datos reales ya
+// cargados en esta misma empresa (rubro, áreas). Requiere que la variable de
+// entorno ANTHROPIC_API_KEY esté configurada; si no lo está, se informa un
+// error claro en vez de fallar de forma confusa. Usa fetch nativo de Node
+// (disponible desde Node 18+), sin agregar ninguna dependencia nueva.
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
+const ANTHROPIC_MODEL = "claude-sonnet-5";
+
+const TIPO_DOC_LABEL_IA = { politica: "una Política de Seguridad y Salud en el Trabajo (SST)", procedimiento: "un Procedimiento o Instructivo de trabajo seguro", manual: "un Manual del sistema de gestión de prevención de riesgos" };
+
+async function redactarDocumentoConIA({ tipo, nombre, contextoAdicional }) {
+  if (!ANTHROPIC_API_KEY) {
+    const err = new Error("La redacción con IA no está configurada en este servidor: falta la variable de entorno ANTHROPIC_API_KEY.");
+    err.statusCode = 500;
+    throw err;
+  }
+  const empresa = await dbGetAll("empresa");
+  const areas = await dbGetAll("areas");
+  const razonSocial = (empresa[0] && empresa[0].razonSocial) || "la empresa";
+  const rubro = (empresa[0] && empresa[0].rubro) || "no especificado";
+  const nombresAreas = areas.map((a) => a.nombre).filter(Boolean).join(", ") || "no especificadas";
+  const tipoDescripcion = TIPO_DOC_LABEL_IA[tipo] || "un documento del sistema de gestión de prevención de riesgos";
+
+  const prompt = `Eres un prevencionista de riesgos experto en normativa chilena (Ley N°16.744, DS N°44/2024, DS N°594). Redacta el contenido completo de ${tipoDescripcion} para la siguiente empresa:
+
+- Razón social: ${razonSocial}
+- Rubro: ${rubro}
+- Áreas de la empresa: ${nombresAreas}
+${contextoAdicional ? `- Contexto adicional indicado por el usuario: ${contextoAdicional}` : ""}
+- Nombre del documento a redactar: "${nombre}"
+
+Redacta el contenido en español de Chile, en formato de texto plano con títulos numerados (1. Objetivo, 2. Alcance, 3. ...), listo para pegar directamente en el campo "Contenido" del documento. No agregues portada, tabla de control de versiones ni hoja de firmas (eso ya lo genera la app por separado). Sé concreto y aterrizado al rubro y áreas indicadas, no genérico.`;
+
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": ANTHROPIC_API_KEY,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: ANTHROPIC_MODEL,
+      max_tokens: 4096,
+      messages: [{ role: "user", content: prompt }],
+    }),
+  });
+  if (!res.ok) {
+    let detail = "";
+    try { detail = (await res.json()).error?.message || ""; } catch (e) {}
+    const err = new Error(detail || `El servicio de IA respondió con un error (${res.status}).`);
+    err.statusCode = 502;
+    throw err;
+  }
+  const data = await res.json();
+  const texto = (data.content || []).map((b) => b.text || "").join("\n").trim();
+  if (!texto) {
+    const err = new Error("El servicio de IA no devolvió contenido.");
+    err.statusCode = 502;
+    throw err;
+  }
+  return texto;
+}
+
 // ---------- arranque: garantiza que exista al menos un admin ----------
 // Reproduce exactamente seedAccesosPorDefecto()/seedCompromisosPorDefecto()
 // de app.html, pero corriendo en el servidor al iniciar (no vía la API),
@@ -254,6 +443,18 @@ const server = http.createServer(async (req, res) => {
     // --- A partir de aquí, todo requiere sesión válida ---
     const payload = verifyToken(getBearerToken(req));
     if (!payload) { sendJson(res, 401, { error: "Sesión inválida o expirada. Vuelve a iniciar sesión." }); return; }
+
+    if (req.method === "POST" && parts[1] === "ia" && parts[2] === "redactar-documento") {
+      const body = (await readBody(req)) || {};
+      if (!body.tipo || !body.nombre) { sendJson(res, 400, { error: "Debes indicar el tipo y el nombre del documento." }); return; }
+      try {
+        const contenido = await redactarDocumentoConIA(body);
+        sendJson(res, 200, { contenido });
+      } catch (err) {
+        sendJson(res, err.statusCode || 500, { error: err.message });
+      }
+      return;
+    }
 
     const store = parts[1];
     if (!STORES_SET.has(store)) { sendJson(res, 404, { error: `Store desconocido: ${store}` }); return; }
