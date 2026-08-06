@@ -264,6 +264,20 @@ async function seedIfEmpty() {
     await dbUpsert("accesoUsuarios", { id: crypto.randomUUID(), nombre: "Administrador del sistema", cargo: "Administrador", perfilId: perfilAdminId, claveHash: hashPassword("admin123"), activo: true });
     console.log('Sembrado usuario "Administrador del sistema" con clave inicial admin123 (cámbiala luego de tu primer ingreso).');
   }
+  const protocolos = await dbGetAll("protocolos");
+  if (protocolos.length === 0) {
+    const PROTOCOLOS_DEFECTO = [
+      { id: "prexor", nombre: "PREXOR", agente: "Ruido (exposición ocupacional)", periodicidadMeses: 12 },
+      { id: "planesi", nombre: "PLANESI", agente: "Sílice", periodicidadMeses: 12 },
+      { id: "tmert", nombre: "TMERT", agente: "Trastornos musculoesqueléticos por trabajo repetitivo", periodicidadMeses: 12 },
+      { id: "psicosocial", nombre: "Riesgos psicosociales", agente: "Factores psicosociales (SUSESO-ISTAS21)", periodicidadMeses: 24 },
+      { id: "uv", nombre: "Radiación UV", agente: "Radiación solar (trabajo en exteriores)", periodicidadMeses: 12 },
+      { id: "hipobaria", nombre: "Hipobaria / hiperbaria", agente: "Altitud geográfica o condiciones hiperbáricas", periodicidadMeses: 12 },
+    ];
+    for (const p of PROTOCOLOS_DEFECTO) await dbUpsert("protocolos", p);
+    console.log("Sembrado catálogo por defecto de protocolos de vigilancia de salud (PREXOR, PLANESI, TMERT, psicosocial, UV, hipobaria).");
+  }
+
   const compromisos = await dbGetAll("compromisosItems");
   if (compromisos.length === 0) {
     const ITEMS_DEFECTO = [
