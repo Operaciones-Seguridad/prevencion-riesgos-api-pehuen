@@ -438,7 +438,12 @@ probabilidad y consecuencia son enteros de 1 a 5. jerarquia es una sola letra A,
     },
     body: JSON.stringify({
       model: ANTHROPIC_MODEL,
-      max_tokens: 4096,
+      // Cada línea (peligro/riesgo/2-4 medidas de control con texto en
+      // español) puede pesar varios cientos de tokens; con un tope fijo,
+      // pedir el máximo de 20 líneas cortaba la respuesta a la mitad y
+      // dejaba un JSON incompleto (JSON.parse fallaba con un mensaje
+      // confuso). Se escala con la cantidad pedida en vez de un valor fijo.
+      max_tokens: Math.min(8000, 800 + cantidadPedida * 400),
       messages: [{ role: "user", content: prompt }],
     }),
   });
@@ -454,10 +459,18 @@ probabilidad y consecuencia son enteros de 1 a 5. jerarquia es una sola letra A,
 
   let crudo;
   try {
-    const limpio = texto.replace(/^```(json)?/i, "").replace(/```$/, "").trim();
-    crudo = JSON.parse(limpio);
+    // Extrae el array JSON aunque venga envuelto en bloques de código
+    // markdown o con algo de texto antes/después (a pesar de la
+    // instrucción de responder solo JSON, el modelo a veces lo agrega).
+    const inicio = texto.indexOf("[");
+    const fin = texto.lastIndexOf("]");
+    if (inicio === -1 || fin === -1 || fin < inicio) throw new Error("sin array JSON");
+    crudo = JSON.parse(texto.slice(inicio, fin + 1));
   } catch (e) {
-    const err = new Error("La IA no devolvió un formato válido, intenta de nuevo.");
+    const cortada = data.stop_reason === "max_tokens";
+    const err = new Error(cortada
+      ? "La respuesta de la IA fue demasiado larga y se cortó a la mitad. Pide menos líneas e intenta de nuevo."
+      : "La IA no devolvió un formato válido, intenta de nuevo.");
     err.statusCode = 502;
     throw err;
   }
