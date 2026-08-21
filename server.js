@@ -192,6 +192,13 @@ async function dbCreateEmpresa(nombre) {
   await pool.query("INSERT INTO empresas (id, nombre) VALUES ($1, $2)", [id, nombre]);
   return { id, nombre, activo: true };
 }
+// Elimina una empresa por completo. Como records.company_id tiene una
+// llave foránea "ON DELETE CASCADE" hacia empresas(id), esto borra en
+// cascada absolutamente todos los datos de esa empresa (trabajadores,
+// accidentes, EPP, usuarios, documentos, todo) -- es irreversible.
+async function dbDeleteEmpresa(id) {
+  await pool.query("DELETE FROM empresas WHERE id = $1", [id]);
+}
 
 // ---------- acceso a datos: STORES (scopeados por company_id) ----------
 async function dbGetAll(companyId, store) {
@@ -409,6 +416,38 @@ const server = http.createServer(async (req, res) => {
       const nueva = await dbCreateEmpresa(String(body.nombre).trim());
       await sembrarEmpresaNueva(nueva.id, { rut: body.rut, rubro: body.rubro });
       sendJson(res, 200, { empresa: nueva, usuarioInicial: "Administrador del sistema", claveInicial: "admin123" });
+      return;
+    }
+
+    // Eliminar una empresa por completo: solo un administrador (de
+    // cualquier empresa ya existente, mismo criterio que para crear una
+    // empresa nueva) puede hacerlo. Es IRREVERSIBLE -- borra en cascada
+    // absolutamente todos los datos de esa empresa. Dos resguardos: no
+    // se puede eliminar la empresa con la que se inició sesión ahora
+    // mismo (para no quedar a medio camino de una sesión inválida), ni
+    // la última empresa que quede en toda la instalación.
+    if (req.method === "DELETE" && parts[1] === "empresas" && parts[2]) {
+      const perfiles = await dbGetAll(companyId, "accesoPerfiles");
+      const usuarioActual = await dbGetOne(companyId, "accesoUsuarios", payload.sub);
+      const perfilActual = usuarioActual && perfiles.find((p) => p.id === usuarioActual.perfilId);
+      if (!perfilActual || perfilActual.esAdmin !== true) {
+        sendJson(res, 403, { error: "Solo un administrador puede eliminar una empresa." });
+        return;
+      }
+      const targetId = parts[2];
+      if (targetId === companyId) {
+        sendJson(res, 400, { error: "No puedes eliminar la empresa con la que iniciaste sesión ahora mismo. Cambia a otra empresa e inténtalo de nuevo." });
+        return;
+      }
+      const objetivo = await dbGetEmpresa(targetId);
+      if (!objetivo) { sendJson(res, 404, { error: "Esa empresa no existe (puede que ya se haya eliminado)." }); return; }
+      const todas = await dbListEmpresas();
+      if (todas.length <= 1) {
+        sendJson(res, 400, { error: "No puedes eliminar la última empresa de la instalación." });
+        return;
+      }
+      await dbDeleteEmpresa(targetId);
+      sendJson(res, 200, { ok: true, eliminada: { id: objetivo.id, nombre: objetivo.nombre } });
       return;
     }
 
