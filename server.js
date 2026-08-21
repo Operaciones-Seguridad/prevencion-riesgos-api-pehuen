@@ -233,14 +233,43 @@ async function dbClearStore(companyId, store) {
 // ---------- redacción automática de documentos con IA ----------
 // Usa la API de mensajes de Anthropic (Claude) para redactar un borrador de
 // política, procedimiento o manual, dando como contexto los datos reales ya
-// cargados en la empresa activa (rubro, áreas). Requiere que la variable de
-// entorno ANTHROPIC_API_KEY esté configurada; si no lo está, se informa un
-// error claro en vez de fallar de forma confusa. Usa fetch nativo de Node
-// (disponible desde Node 18+), sin agregar ninguna dependencia nueva.
+// cargados en la empresa activa: rubro, áreas, el perfil de riesgos de la
+// Matriz de riesgos, los focos críticos de Accidentabilidad y un resumen
+// agregado del historial real de accidentes (solo conteos, nunca el detalle
+// de cada caso). Para un Procedimiento, además cruza la Matriz de riesgos
+// con el mismo criterio que ya usa el PDF de Control Documental
+// (matrizLineasParaDocumento en index.html): líneas cuya medida de control
+// administrativa "D" coincide exactamente con el nombre del documento, para
+// que el borrador cubra en detalle justo los peligros que ese procedimiento
+// debe controlar. Requiere que la variable de entorno ANTHROPIC_API_KEY esté
+// configurada; si no lo está, se informa un error claro en vez de fallar de
+// forma confusa. Usa fetch nativo de Node (disponible desde Node 18+), sin
+// agregar ninguna dependencia nueva.
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
 const ANTHROPIC_MODEL = "claude-sonnet-5";
 
 const TIPO_DOC_LABEL_IA = { politica: "una Política de Seguridad y Salud en el Trabajo (SST)", procedimiento: "un Procedimiento o Instructivo de trabajo seguro", manual: "un Manual del sistema de gestión de prevención de riesgos" };
+
+// Mismo cálculo de nivel de riesgo que usa el frontend (index.html: nivelRiesgo).
+function nivelRiesgoIA(p, c) {
+  const v = (p || 0) * (c || 0);
+  if (v <= 4) return "Bajo";
+  if (v <= 9) return "Medio";
+  if (v <= 16) return "Alto";
+  return "Crítico";
+}
+// Mismo parseo que usa el frontend (index.html: parseControlesBullets/jerarquiaDe)
+// para leer las medidas de control jerarquizadas (A-E, DS 44) de una línea de
+// la matriz, ya sea desde el campo estructurado o desde el texto libre heredado.
+function jerarquiaDeIA(m) {
+  if (Array.isArray(m.controlesJerarquizados) && m.controlesJerarquizados.length) return m.controlesJerarquizados;
+  const partirLineas = (txt) => String(txt || "").split(/\n+/).map((l) => l.trim()).filter(Boolean);
+  const bulletRe = /^[•\-\*]?\s*([A-E])\)\s*(.*)$/i;
+  return partirLineas(m.controles).map((linea) => {
+    const bm = linea.match(bulletRe);
+    return { jerarquia: bm ? bm[1].toUpperCase() : "", texto: bm ? bm[2].trim() : linea };
+  });
+}
 
 async function redactarDocumentoConIA(companyId, { tipo, nombre, contextoAdicional }) {
   if (!ANTHROPIC_API_KEY) {
@@ -248,22 +277,67 @@ async function redactarDocumentoConIA(companyId, { tipo, nombre, contextoAdicion
     err.statusCode = 500;
     throw err;
   }
-  const empresa = await dbGetAll(companyId, "empresa");
-  const areas = await dbGetAll(companyId, "areas");
+  const [empresa, areas, matriz, accidentes, catalogosExtra] = await Promise.all([
+    dbGetAll(companyId, "empresa"),
+    dbGetAll(companyId, "areas"),
+    dbGetAll(companyId, "matriz"),
+    dbGetAll(companyId, "accidentes"),
+    dbGetAll(companyId, "catalogosExtra"),
+  ]);
   const razonSocial = (empresa[0] && empresa[0].razonSocial) || "la empresa";
   const rubro = (empresa[0] && empresa[0].rubro) || "no especificado";
   const nombresAreas = areas.map((a) => a.nombre).filter(Boolean).join(", ") || "no especificadas";
+  const areaNombre = (id) => (areas.find((a) => a.id === id) || {}).nombre || "";
   const tipoDescripcion = TIPO_DOC_LABEL_IA[tipo] || "un documento del sistema de gestión de prevención de riesgos";
+
+  // Perfil de riesgos: las líneas de la Matriz más críticas (por
+  // probabilidad×consecuencia), para que el borrador se aterrice a los
+  // peligros reales de la empresa en vez de hablar en términos genéricos.
+  const perfilRiesgos = matriz
+    .slice()
+    .sort((a, b) => (b.probabilidad || 0) * (b.consecuencia || 0) - (a.probabilidad || 0) * (a.consecuencia || 0))
+    .slice(0, 15)
+    .map((m) => `- [${nivelRiesgoIA(m.probabilidad, m.consecuencia)}] ${areaNombre(m.areaId) || "Sin área"}: ${m.peligro || "peligro sin describir"} → ${m.riesgo || "riesgo sin describir"}`)
+    .join("\n");
+
+  const focosCriticos = ((catalogosExtra.find((c) => c.id === "focoCritico") || {}).valores || []).join(", ");
+
+  const porTipo = {};
+  accidentes.forEach((a) => { const k = a.tipo || "sin tipo"; porTipo[k] = (porTipo[k] || 0) + 1; });
+  const resumenAccidentes = accidentes.length
+    ? Object.entries(porTipo).map(([k, n]) => `${n} de tipo "${k}"`).join(", ") + ` (${accidentes.length} registros en total)`
+    : "sin accidentes/incidentes registrados";
+
+  // Para un Procedimiento, cruza la Matriz con el mismo criterio que el PDF
+  // de Control Documental: líneas cuya medida de control administrativa (D)
+  // coincide exactamente (texto normalizado) con el nombre del documento.
+  let riesgosEspecificos = "";
+  if (tipo === "procedimiento" && nombre) {
+    const norm = (s) => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
+    const keyTexto = norm(nombre);
+    const lineas = matriz.filter((m) => jerarquiaDeIA(m).some((it) => it.jerarquia === "D" && norm(it.texto) === keyTexto));
+    if (lineas.length) {
+      riesgosEspecificos = lineas
+        .map((m) => `- Área ${areaNombre(m.areaId) || "sin área"}, ${[m.proceso, m.actividad].filter(Boolean).join(" / ") || "sin proceso/actividad"}: peligro "${m.peligro || "—"}", riesgo "${m.riesgo || "—"}" (nivel ${nivelRiesgoIA(m.probabilidad, m.consecuencia)})`)
+        .join("\n");
+    }
+  }
 
   const prompt = `Eres un prevencionista de riesgos experto en normativa chilena (Ley N°16.744, DS N°44/2024, DS N°594). Redacta el contenido completo de ${tipoDescripcion} para la siguiente empresa:
 
 - Razón social: ${razonSocial}
 - Rubro: ${rubro}
 - Áreas de la empresa: ${nombresAreas}
-${contextoAdicional ? `- Contexto adicional indicado por el usuario: ${contextoAdicional}` : ""}
 - Nombre del documento a redactar: "${nombre}"
+${contextoAdicional ? `- Contexto adicional indicado por el usuario: ${contextoAdicional}` : ""}
 
-Redacta el contenido en español de Chile, en formato de texto plano con títulos numerados (1. Objetivo, 2. Alcance, 3. ...), listo para pegar directamente en el campo "Contenido" del documento. No agregues portada, tabla de control de versiones ni hoja de firmas (eso ya lo genera la app por separado). Sé concreto y aterrizado al rubro y áreas indicadas, no genérico.`;
+Datos reales ya cargados en el sistema de esta empresa, para que el contenido sea específico y no genérico:
+- Perfil de riesgos (líneas más críticas de la Matriz de riesgos vigente, de mayor a menor nivel):
+${perfilRiesgos || "  Sin líneas registradas todavía en la Matriz de riesgos."}
+- Focos críticos de accidentabilidad registrados: ${focosCriticos || "no registrados"}
+- Historial real de accidentes/incidentes: ${resumenAccidentes}
+${riesgosEspecificos ? `\nEste documento está registrado en la Matriz de riesgos como medida de control administrativo (jerarquía D, DS 44) para estas líneas específicas -- el contenido DEBE cubrir en detalle exactamente estos peligros y riesgos, con los pasos/medidas concretas para controlarlos:\n${riesgosEspecificos}\n` : ""}
+Redacta el contenido en español de Chile, en formato de texto plano con títulos numerados (1. Objetivo, 2. Alcance, 3. ...), listo para pegar directamente en el campo "Contenido" del documento. No agregues portada, tabla de control de versiones ni hoja de firmas (eso ya lo genera la app por separado). Sé concreto y aterrizado a los datos reales indicados arriba (rubro, áreas, riesgos, focos críticos), no genérico.`;
 
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
