@@ -508,6 +508,186 @@ probabilidad y consecuencia son enteros de 1 a 5. jerarquia es una sola letra A,
   return sugerencias;
 }
 
+const TIPOS_ITEM_FORMATO_VALIDOS = new Set(["check", "texto"]);
+
+// ---------- sugerencia de ítems para un formato de inspección/observación con IA ----------
+// Igual criterio que sugerirMatrizConIA: nunca se guarda sola, el frontend
+// agrega las sugerencias a la misma tabla editable (currentFmtItems) que ya
+// usa el constructor manual y la importación desde Excel, así que sirve
+// tanto para armar un formato nuevo como para completar uno ya existente
+// (basta con que el frontend ya haya cargado sus ítems ahí antes de pedir
+// sugerencias).
+async function sugerirFormatoInspeccionConIA(companyId, { tema, categoria, contextoAdicional, itemsExistentes, cantidad }) {
+  if (!ANTHROPIC_API_KEY) {
+    const err = new Error("La sugerencia con IA no está configurada en este servidor: falta la variable de entorno ANTHROPIC_API_KEY.");
+    err.statusCode = 500;
+    throw err;
+  }
+  const temaTexto = String(tema || "").trim();
+  if (!temaTexto) {
+    const err = new Error('Debes indicar el "Nombre del formato" antes de pedir ítems sugeridos, para que la IA sepa sobre qué tema proponerlos.');
+    err.statusCode = 400;
+    throw err;
+  }
+  const cantidadPedida = clampEntero(cantidad, 1, 20, 8);
+  const [empresa, matriz] = await Promise.all([
+    dbGetAll(companyId, "empresa"),
+    dbGetAll(companyId, "matriz"),
+  ]);
+  const razonSocial = (empresa[0] && empresa[0].razonSocial) || "la empresa";
+  const rubro = (empresa[0] && empresa[0].rubro) || "no especificado";
+
+  // Acota el perfil de riesgos al tema del formato (a diferencia de
+  // redactarDocumentoConIA, que usa las líneas más críticas sin filtrar):
+  // busca líneas cuyo peligro/riesgo/categoría/actividad/proceso comparta
+  // alguna palabra con el tema. Si ninguna coincide, cae al listado
+  // general de las más críticas (mismo criterio de "fallback silencioso"
+  // que usa redactarDocumentoConIA cuando no hay coincidencia específica).
+  const normPalabras = (s) => String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").split(/[^a-z0-9]+/).filter((w) => w.length > 3);
+  const palabrasTema = new Set(normPalabras(temaTexto));
+  const textoLinea = (m) => [m.peligro, m.riesgo, m.categoria, m.actividad, m.proceso].filter(Boolean).join(" ");
+  const nivel = (m) => (m.probabilidad || 0) * (m.consecuencia || 0);
+  let relevantes = palabrasTema.size
+    ? matriz.filter((m) => normPalabras(textoLinea(m)).some((w) => palabrasTema.has(w)))
+    : [];
+  if (!relevantes.length) relevantes = matriz.slice().sort((a, b) => nivel(b) - nivel(a));
+  const perfilRiesgos = relevantes.slice(0, 15).map((m) => `- ${m.peligro || "peligro sin describir"} → ${m.riesgo || "riesgo sin describir"}`).join("\n");
+
+  const CATEGORIA_DESC = { ambos: "tanto para Inspección como para Observación", inspeccion: "para una Inspección", observacion: "para una Observación" };
+  const categoriaDesc = CATEGORIA_DESC[categoria] || "para un formato de inspección/observación";
+  const existentesTexto = (Array.isArray(itemsExistentes) ? itemsExistentes : []).filter(Boolean).map((t) => `- ${t}`).join("\n");
+
+  const prompt = `Eres un prevencionista de riesgos experto en normativa chilena (Ley N°16.744, DS N°44/2024, DS N°594). Estás construyendo un formato/checklist ${categoriaDesc}, llamado "${temaTexto}".
+
+Empresa:
+- Razón social: ${razonSocial}
+- Rubro: ${rubro}
+${contextoAdicional ? `- Contexto adicional indicado por el usuario: ${contextoAdicional}\n` : ""}
+Peligros/riesgos reales de la empresa relacionados con este tema (Matriz de riesgos vigente, cuando aplica):
+${perfilRiesgos || "  Sin líneas relacionadas registradas todavía en la Matriz de riesgos."}
+
+Ítems que YA están en este formato (no los repitas; tu tarea es COMPLEMENTAR)${existentesTexto ? ":" : " (todavía no hay ninguno)."}
+${existentesTexto}
+
+Propón exactamente ${cantidadPedida} ítems NUEVOS de checklist, concretos y verificables en terreno por un inspector. Para cada ítem decide el tipo de respuesta: "check" si se responde Cumple/No cumple/N/A (la mayoría de los casos), o "texto" SOLO cuando de verdad haga falta anotar un dato libre (una cantidad, una fecha, un nombre, una medición).
+
+Responde ÚNICAMENTE con un array JSON válido (sin texto antes ni después, sin bloques de código markdown), con esta forma exacta:
+[{"text": "...", "tipo": "check"}]`;
+
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": ANTHROPIC_API_KEY,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: ANTHROPIC_MODEL,
+      max_tokens: Math.min(4000, 400 + cantidadPedida * 120),
+      messages: [{ role: "user", content: prompt }],
+    }),
+  });
+  if (!res.ok) {
+    let detail = "";
+    try { detail = (await res.json()).error?.message || ""; } catch (e) {}
+    const err = new Error(detail || `El servicio de IA respondió con un error (${res.status}).`);
+    err.statusCode = 502;
+    throw err;
+  }
+  const data = await res.json();
+  const texto = (data.content || []).map((b) => b.text || "").join("\n").trim();
+
+  let crudo;
+  try {
+    const inicio = texto.indexOf("[");
+    const fin = texto.lastIndexOf("]");
+    if (inicio === -1 || fin === -1 || fin < inicio) throw new Error("sin array JSON");
+    crudo = JSON.parse(texto.slice(inicio, fin + 1));
+  } catch (e) {
+    const cortada = data.stop_reason === "max_tokens";
+    const err = new Error(cortada
+      ? "La respuesta de la IA fue demasiado larga y se cortó a la mitad. Pide menos ítems e intenta de nuevo."
+      : "La IA no devolvió un formato válido, intenta de nuevo.");
+    err.statusCode = 502;
+    throw err;
+  }
+  if (!Array.isArray(crudo)) {
+    const err = new Error("La IA no devolvió un formato válido, intenta de nuevo.");
+    err.statusCode = 502;
+    throw err;
+  }
+
+  const sugerencias = crudo
+    .slice(0, cantidadPedida)
+    .map((it) => ({
+      text: (it && String(it.text || "").trim()) || "",
+      tipo: it && TIPOS_ITEM_FORMATO_VALIDOS.has(String(it.tipo || "").toLowerCase()) ? String(it.tipo).toLowerCase() : "check",
+    }))
+    .filter((it) => it.text);
+
+  return sugerencias;
+}
+
+// ---------- redacción de un hallazgo/observación con IA ----------
+// A partir de una nota breve/informal que el inspector ya escribió en
+// terreno, le da forma de descripción formal. A diferencia de las otras
+// dos funciones de IA, no necesita el perfil de riesgos completo de la
+// empresa: es una redacción puntual de lo que el inspector ya observó, no
+// un documento que deba cubrir todo el perfil de riesgo.
+async function redactarHallazgoConIA(companyId, { notaBreve, nivel, areaNombre, tipoRegistro, formatoNombre, descripcionInspeccion }) {
+  if (!ANTHROPIC_API_KEY) {
+    const err = new Error("La redacción con IA no está configurada en este servidor: falta la variable de entorno ANTHROPIC_API_KEY.");
+    err.statusCode = 500;
+    throw err;
+  }
+  const notaTexto = String(notaBreve || "").trim();
+  if (!notaTexto) {
+    const err = new Error("Escribe primero una nota breve del hallazgo (aunque sea informal) para que la IA la redacte en forma más formal.");
+    err.statusCode = 400;
+    throw err;
+  }
+  const [empresa] = await Promise.all([dbGetAll(companyId, "empresa")]);
+  const razonSocial = (empresa[0] && empresa[0].razonSocial) || "la empresa";
+  const rubro = (empresa[0] && empresa[0].rubro) || "no especificado";
+  const NIVEL_LABEL_IA = { bajo: "Bajo", medio: "Medio", alto: "Alto", critico: "Crítico" };
+  const tipoRegistroTexto = tipoRegistro === "observacion" ? "una Observación" : "una Inspección";
+
+  const prompt = `Eres un prevencionista de riesgos experto en normativa chilena (DS N°44/2024, DS N°594, Ley N°16.744). Redacta en español de Chile la descripción formal de un hallazgo detectado durante ${tipoRegistroTexto} de seguridad en ${razonSocial} (rubro: ${rubro})${formatoNombre ? `, formato "${formatoNombre}"` : ""}${areaNombre ? `, área "${areaNombre}"` : ""}.
+${descripcionInspeccion ? `Contexto general de esta visita: ${descripcionInspeccion}\n` : ""}Nivel de riesgo asignado por el inspector: ${NIVEL_LABEL_IA[nivel] || "Bajo"}.
+Nota breve/informal escrita por el inspector en terreno: "${notaTexto}"
+
+Redacta la descripción del hallazgo en 2 a 4 frases, en tono técnico y objetivo, lista para quedar registrada formalmente. No inventes datos que la nota no menciona (no agregues números, nombres ni fechas que no estén en la nota) -- solo dale forma clara y profesional a lo que el inspector ya escribió. Responde únicamente con el texto de la descripción, sin títulos, comillas ni texto adicional.`;
+
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": ANTHROPIC_API_KEY,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: ANTHROPIC_MODEL,
+      max_tokens: 600,
+      messages: [{ role: "user", content: prompt }],
+    }),
+  });
+  if (!res.ok) {
+    let detail = "";
+    try { detail = (await res.json()).error?.message || ""; } catch (e) {}
+    const err = new Error(detail || `El servicio de IA respondió con un error (${res.status}).`);
+    err.statusCode = 502;
+    throw err;
+  }
+  const data = await res.json();
+  const descripcion = (data.content || []).map((b) => b.text || "").join("\n").trim();
+  if (!descripcion) {
+    const err = new Error("El servicio de IA no devolvió contenido.");
+    err.statusCode = 502;
+    throw err;
+  }
+  return descripcion;
+}
+
 // ---------- siembra de datos por defecto de una empresa nueva ----------
 // Reproduce lo que antes había que hacer a mano (desplegar un servidor y una
 // base de datos nuevos en Render): crea los perfiles de acceso estándar, el
@@ -733,6 +913,28 @@ const server = http.createServer(async (req, res) => {
       try {
         const sugerencias = await sugerirMatrizConIA(companyId, body);
         sendJson(res, 200, { sugerencias });
+      } catch (err) {
+        sendJson(res, err.statusCode || 500, { error: err.message });
+      }
+      return;
+    }
+
+    if (req.method === "POST" && parts[1] === "ia" && parts[2] === "sugerir-formato-inspeccion") {
+      const body = (await readBody(req)) || {};
+      try {
+        const sugerencias = await sugerirFormatoInspeccionConIA(companyId, body);
+        sendJson(res, 200, { sugerencias });
+      } catch (err) {
+        sendJson(res, err.statusCode || 500, { error: err.message });
+      }
+      return;
+    }
+
+    if (req.method === "POST" && parts[1] === "ia" && parts[2] === "redactar-hallazgo") {
+      const body = (await readBody(req)) || {};
+      try {
+        const descripcion = await redactarHallazgoConIA(companyId, body);
+        sendJson(res, 200, { descripcion });
       } catch (err) {
         sendJson(res, err.statusCode || 500, { error: err.message });
       }
