@@ -177,6 +177,15 @@ function slugify(nombre) {
     .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "empresa";
   return `${base}-${crypto.randomBytes(3).toString("hex")}`;
 }
+// Normaliza el Rubro (texto libre en el store "empresa") para que
+// variaciones de escritura del mismo rubro ("Construcción", "construcción
+// SPA", "CONSTRUCCION") compartan el mismo grupo en catalogos_rubro --
+// mismo criterio NFD que ya usa slugify() arriba.
+function normRubro(s) {
+  return String(s || "")
+    .normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .toLowerCase().trim().replace(/\s+/g, " ");
+}
 
 // ---------- acceso a datos: EMPRESAS (registro maestro de compañías) ----------
 async function dbListEmpresas() {
@@ -726,6 +735,31 @@ const server = http.createServer(async (req, res) => {
       } catch (err) {
         sendJson(res, err.statusCode || 500, { error: err.message });
       }
+      return;
+    }
+
+    // Catálogo de Proceso/Actividad/Categoría/Peligro compartido por Rubro
+    // (tabla catalogos_rubro, deliberadamente NO aislada por company_id --
+    // ver el comentario en schema.sql). El rubro nunca viaja desde el
+    // cliente: siempre se lee del store "empresa" de la empresa del token.
+    if (req.method === "GET" && parts[1] === "catalogo-rubro") {
+      const empresaRows = await dbGetAll(companyId, "empresa");
+      const rubroNorm = normRubro(empresaRows[0] && empresaRows[0].rubro);
+      const { rows } = await pool.query("SELECT tipo, valor FROM catalogos_rubro WHERE rubro_norm = $1 ORDER BY tipo, valor", [rubroNorm]);
+      const porTipo = {};
+      for (const r of rows) { (porTipo[r.tipo] = porTipo[r.tipo] || []).push(r.valor); }
+      sendJson(res, 200, Object.entries(porTipo).map(([tipo, valores]) => ({ tipo, valores })));
+      return;
+    }
+    if (req.method === "POST" && parts[1] === "catalogo-rubro") {
+      const body = (await readBody(req)) || {};
+      const tipo = String(body.tipo || "").trim();
+      const valor = String(body.valor || "").trim();
+      if (!tipo || !valor) { sendJson(res, 400, { error: "Debes indicar tipo y valor." }); return; }
+      const empresaRows = await dbGetAll(companyId, "empresa");
+      const rubroNorm = normRubro(empresaRows[0] && empresaRows[0].rubro);
+      await pool.query("INSERT INTO catalogos_rubro (rubro_norm, tipo, valor) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING", [rubroNorm, tipo, valor]);
+      sendJson(res, 200, { ok: true });
       return;
     }
 
