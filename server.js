@@ -369,6 +369,122 @@ Redacta el contenido en español de Chile, en formato de texto plano con título
   return texto;
 }
 
+const JERARQUIAS_VALIDAS = new Set(["A", "B", "C", "D", "E"]);
+function clampEntero(v, min, max, fallback) {
+  const n = Math.round(Number(v));
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
+}
+
+// ---------- sugerencia de líneas nuevas para la Matriz de riesgos con IA ----------
+// Le pide a Claude que proponga líneas nuevas (peligro/riesgo/controles) para
+// la Matriz de riesgos de la empresa activa, en JSON estructurado. Usa como
+// contexto las líneas YA existentes para que el resultado "complemente" la
+// matriz sin repetir lo ya cargado (si la matriz está vacía, simplemente no
+// hay nada que evitar duplicar, y el resultado equivale a generarla desde
+// cero). Las sugerencias NUNCA se guardan solas: el frontend las muestra en
+// una previsualización con checkbox y el usuario decide cuáles agregar de
+// verdad (mismo criterio ya usado en redactarDocumentoConIA).
+async function sugerirMatrizConIA(companyId, { contextoAdicional, cantidad }) {
+  if (!ANTHROPIC_API_KEY) {
+    const err = new Error("La sugerencia con IA no está configurada en este servidor: falta la variable de entorno ANTHROPIC_API_KEY.");
+    err.statusCode = 500;
+    throw err;
+  }
+  const cantidadPedida = clampEntero(cantidad, 1, 20, 8);
+  const [empresa, areas, matriz] = await Promise.all([
+    dbGetAll(companyId, "empresa"),
+    dbGetAll(companyId, "areas"),
+    dbGetAll(companyId, "matriz"),
+  ]);
+  const razonSocial = (empresa[0] && empresa[0].razonSocial) || "la empresa";
+  const rubro = (empresa[0] && empresa[0].rubro) || "no especificado";
+  const areaNombre = (id) => (areas.find((a) => a.id === id) || {}).nombre || "";
+  const listaAreas = areas.length
+    ? areas.map((a) => `- id "${a.id}": ${a.nombre}`).join("\n")
+    : "  (esta empresa todavía no tiene áreas registradas; usa areaId null)";
+
+  const TOPE_LINEAS_EXISTENTES = 100;
+  const lineasExistentes = matriz
+    .slice(0, TOPE_LINEAS_EXISTENTES)
+    .map((m) => `- ${areaNombre(m.areaId) || "Sin área"} / ${[m.proceso, m.actividad].filter(Boolean).join(" / ") || "sin proceso/actividad"}: ${m.peligro || "—"} → ${m.riesgo || "—"}`)
+    .join("\n");
+  const notaTruncado = matriz.length > TOPE_LINEAS_EXISTENTES ? `\n  (y ${matriz.length - TOPE_LINEAS_EXISTENTES} línea(s) más no listadas aquí)` : "";
+
+  const prompt = `Eres un prevencionista de riesgos experto en normativa chilena (Ley N°16.744, DS N°44/2024, DS N°594), especialista en construir Matrices de Identificación de Peligros y Evaluación de Riesgos (IPER).
+
+Empresa:
+- Razón social: ${razonSocial}
+- Rubro: ${rubro}
+- Áreas registradas (usa EXACTAMENTE uno de estos "id" en el campo areaId de cada línea que propongas, o null si ninguna aplica):
+${listaAreas}
+${contextoAdicional ? `- Contexto adicional indicado por el usuario: ${contextoAdicional}\n` : ""}
+Líneas que YA existen en la Matriz de riesgos de esta empresa (no las repitas; tu tarea es COMPLEMENTAR, proponiendo peligros/riesgos distintos a los ya cubiertos${matriz.length ? "" : " -- como todavía no hay ninguna línea, proponlas desde cero para el rubro indicado"}):
+${lineasExistentes || "  (todavía no hay ninguna línea cargada)"}${notaTruncado}
+
+Propón exactamente ${cantidadPedida} línea(s) NUEVA(s) para la Matriz de riesgos, relevantes al rubro y áreas de esta empresa. Para cada línea, sigue la jerarquía de controles del DS 44 (Eliminación, Sustitución, Control de ingeniería, Control administrativo, EPP): incluye 2 a 4 medidas de control abarcando distintos niveles de esa jerarquía, y NUNCA dejes el EPP (jerarquía E) como única medida de control.
+
+Responde ÚNICAMENTE con un array JSON válido (sin texto antes ni después, sin bloques de código markdown), con esta forma exacta:
+[{"areaId": "id de área o null", "proceso": "...", "actividad": "...", "categoria": "Físico|Químico|Biológico|Ergonómico|Psicosocial|otro texto breve", "peligro": "...", "riesgo": "...", "probabilidad": 1, "consecuencia": 1, "controlesJerarquizados": [{"jerarquia": "A", "texto": "..."}]}]
+
+probabilidad y consecuencia son enteros de 1 a 5. jerarquia es una sola letra A, B, C, D o E.`;
+
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": ANTHROPIC_API_KEY,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: ANTHROPIC_MODEL,
+      max_tokens: 4096,
+      messages: [{ role: "user", content: prompt }],
+    }),
+  });
+  if (!res.ok) {
+    let detail = "";
+    try { detail = (await res.json()).error?.message || ""; } catch (e) {}
+    const err = new Error(detail || `El servicio de IA respondió con un error (${res.status}).`);
+    err.statusCode = 502;
+    throw err;
+  }
+  const data = await res.json();
+  const texto = (data.content || []).map((b) => b.text || "").join("\n").trim();
+
+  let crudo;
+  try {
+    const limpio = texto.replace(/^```(json)?/i, "").replace(/```$/, "").trim();
+    crudo = JSON.parse(limpio);
+  } catch (e) {
+    const err = new Error("La IA no devolvió un formato válido, intenta de nuevo.");
+    err.statusCode = 502;
+    throw err;
+  }
+  if (!Array.isArray(crudo)) {
+    const err = new Error("La IA no devolvió un formato válido, intenta de nuevo.");
+    err.statusCode = 502;
+    throw err;
+  }
+
+  const areaIds = new Set(areas.map((a) => a.id));
+  const sugerencias = crudo.slice(0, cantidadPedida).map((m) => ({
+    areaId: m && areaIds.has(m.areaId) ? m.areaId : null,
+    proceso: (m && String(m.proceso || "").trim()) || "",
+    actividad: (m && String(m.actividad || "").trim()) || "",
+    categoria: (m && String(m.categoria || "").trim()) || "",
+    peligro: (m && String(m.peligro || "").trim()) || "",
+    riesgo: (m && String(m.riesgo || "").trim()) || "",
+    probabilidad: clampEntero(m && m.probabilidad, 1, 5, 3),
+    consecuencia: clampEntero(m && m.consecuencia, 1, 5, 3),
+    controlesJerarquizados: (m && Array.isArray(m.controlesJerarquizados) ? m.controlesJerarquizados : [])
+      .filter((c) => c && JERARQUIAS_VALIDAS.has(String(c.jerarquia || "").toUpperCase()))
+      .map((c) => ({ jerarquia: String(c.jerarquia).toUpperCase(), texto: String(c.texto || "").trim(), responsable: "", plazo: "" })),
+  }));
+
+  return sugerencias;
+}
+
 // ---------- siembra de datos por defecto de una empresa nueva ----------
 // Reproduce lo que antes había que hacer a mano (desplegar un servidor y una
 // base de datos nuevos en Render): crea los perfiles de acceso estándar, el
@@ -583,6 +699,17 @@ const server = http.createServer(async (req, res) => {
       try {
         const contenido = await redactarDocumentoConIA(companyId, body);
         sendJson(res, 200, { contenido });
+      } catch (err) {
+        sendJson(res, err.statusCode || 500, { error: err.message });
+      }
+      return;
+    }
+
+    if (req.method === "POST" && parts[1] === "ia" && parts[2] === "sugerir-matriz") {
+      const body = (await readBody(req)) || {};
+      try {
+        const sugerencias = await sugerirMatrizConIA(companyId, body);
+        sendJson(res, 200, { sugerencias });
       } catch (err) {
         sendJson(res, err.statusCode || 500, { error: err.message });
       }
