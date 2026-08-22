@@ -282,7 +282,7 @@ function jerarquiaDeIA(m) {
   });
 }
 
-async function redactarDocumentoConIA(companyId, { tipo, nombre, contextoAdicional }) {
+async function redactarDocumentoConIA(companyId, { tipo, nombre, contextoAdicional, documentoId }) {
   if (!ANTHROPIC_API_KEY) {
     const err = new Error("La redacción con IA no está configurada en este servidor: falta la variable de entorno ANTHROPIC_API_KEY.");
     err.statusCode = 500;
@@ -321,12 +321,16 @@ async function redactarDocumentoConIA(companyId, { tipo, nombre, contextoAdicion
 
   // Para un Procedimiento, cruza la Matriz con el mismo criterio que el PDF
   // de Control Documental: líneas cuya medida de control administrativa (D)
-  // coincide exactamente (texto normalizado) con el nombre del documento.
+  // está vinculada a este documento por id (documentoId, fuente de verdad,
+  // solo aplica cuando se está redactando un documento ya guardado) o,
+  // como respaldo, cuyo texto coincide exactamente (normalizado) con el
+  // nombre del documento -- mismo criterio doble que matrizLineasParaDocumento
+  // en el frontend (index.html).
   let riesgosEspecificos = "";
-  if (tipo === "procedimiento" && nombre) {
+  if (tipo === "procedimiento" && (nombre || documentoId)) {
     const norm = (s) => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
     const keyTexto = norm(nombre);
-    const lineas = matriz.filter((m) => jerarquiaDeIA(m).some((it) => it.jerarquia === "D" && norm(it.texto) === keyTexto));
+    const lineas = matriz.filter((m) => jerarquiaDeIA(m).some((it) => it.jerarquia === "D" && (it.documentoId === documentoId || (nombre && norm(it.texto) === keyTexto))));
     if (lineas.length) {
       riesgosEspecificos = lineas
         .map((m) => `- Área ${areaNombre(m.areaId) || "sin área"}, ${[m.proceso, m.actividad].filter(Boolean).join(" / ") || "sin proceso/actividad"}: peligro "${m.peligro || "—"}", riesgo "${m.riesgo || "—"}" (nivel ${nivelRiesgoIA(m.probabilidad, m.consecuencia)})`)
