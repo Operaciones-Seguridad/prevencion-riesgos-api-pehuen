@@ -53,7 +53,7 @@ const STORES = [
   "cphysCapacitaciones", "grdAmenazas", "grdComite", "grdPlanRespuesta",
   "grdSimulacros", "grdPlanAccion", "iapRegistros", "accesoPerfiles",
   "accesoUsuarios", "levantamientos", "compromisosItems", "compromisosRegistros",
-  "planAccionMatriz",
+  "planAccionMatriz", "eppStock",
 ];
 const STORES_SET = new Set(STORES);
 
