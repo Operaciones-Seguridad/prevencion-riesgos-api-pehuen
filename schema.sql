@@ -31,6 +31,14 @@ CREATE TABLE IF NOT EXISTS empresas (
   creado_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- aprobada: por defecto true para que TODA empresa que ya existía antes de
+-- este campo (todas las reales de Carlos) siga entrando exactamente igual,
+-- sin migración manual. Solo el registro público (POST
+-- /api/public/empresas/registro) la crea en false a propósito -- nace
+-- pendiente hasta que un superAdmin la aprueba (POST /api/empresas/:id/aprobar);
+-- las que Carlos crea a mano desde Configuración nacen ya aprobadas.
+ALTER TABLE empresas ADD COLUMN IF NOT EXISTS aprobada BOOLEAN NOT NULL DEFAULT true;
+
 INSERT INTO empresas (id, nombre) VALUES ('pehuen', 'Pehuén')
 ON CONFLICT (id) DO NOTHING;
 

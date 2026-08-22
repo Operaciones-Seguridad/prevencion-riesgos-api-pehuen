@@ -191,17 +191,21 @@ function normRubro(s) {
 
 // ---------- acceso a datos: EMPRESAS (registro maestro de compañías) ----------
 async function dbListEmpresas() {
-  const { rows } = await pool.query("SELECT id, nombre, activo FROM empresas WHERE activo = true ORDER BY nombre ASC");
+  const { rows } = await pool.query("SELECT id, nombre, activo, aprobada FROM empresas WHERE activo = true ORDER BY nombre ASC");
   return rows;
 }
 async function dbGetEmpresa(id) {
-  const { rows } = await pool.query("SELECT id, nombre, activo FROM empresas WHERE id = $1", [id]);
+  const { rows } = await pool.query("SELECT id, nombre, activo, aprobada FROM empresas WHERE id = $1", [id]);
   return rows[0] || null;
 }
-async function dbCreateEmpresa(nombre) {
+// aprobada=true para empresas creadas por un superAdmin (Configuración o
+// seedIfEmpty): las está dando de alta a mano, no necesitan aprobarse a
+// sí mismas. aprobada=false para el registro público (ver más abajo) --
+// nace pendiente hasta que un superAdmin la apruebe.
+async function dbCreateEmpresa(nombre, aprobada = true) {
   const id = slugify(nombre);
-  await pool.query("INSERT INTO empresas (id, nombre) VALUES ($1, $2)", [id, nombre]);
-  return { id, nombre, activo: true };
+  await pool.query("INSERT INTO empresas (id, nombre, aprobada) VALUES ($1, $2, $3)", [id, nombre, aprobada]);
+  return { id, nombre, activo: true, aprobada };
 }
 // Elimina una empresa por completo. Como records.company_id tiene una
 // llave foránea "ON DELETE CASCADE" hacia empresas(id), esto borra en
@@ -842,29 +846,39 @@ const server = http.createServer(async (req, res) => {
     //    tienen correo cargado, sigan entrando exactamente igual.
     if (req.method === "POST" && parts[1] === "auth" && parts[2] === "login") {
       const body = (await readBody(req)) || {};
+      const MSG_PENDIENTE = "Tu empresa todavía está pendiente de aprobación. Te avisaremos apenas esté activa.";
       if (body.email) {
         const email = String(body.email).trim().toLowerCase();
         const clave = body.clave || "";
         const candidatos = await dbFindUsuariosPorEmail(email);
-        const validos = candidatos.filter((c) => c.data.activo !== false && verifyPassword(clave, c.data.claveHash));
-        if (!validos.length) { sendJson(res, 401, { error: "Correo o clave incorrectos." }); return; }
-        let elegido = validos[0];
-        if (validos.length > 1) {
-          elegido = body.empresaId ? validos.find((v) => v.companyId === body.empresaId) : null;
+        const conClaveOk = candidatos.filter((c) => c.data.activo !== false && verifyPassword(clave, c.data.claveHash));
+        if (!conClaveOk.length) { sendJson(res, 401, { error: "Correo o clave incorrectos." }); return; }
+        // Resolver la empresa de cada candidato válido y quedarse solo con
+        // las activas -- las pendientes de aprobación se filtran acá mismo
+        // (no tiene sentido ofrecerlas en el selector de "elige cuál").
+        const conEmpresa = [];
+        for (const c of conClaveOk) {
+          const e = await dbGetEmpresa(c.companyId);
+          if (e && e.activo !== false) conEmpresa.push({ ...c, empresa: e });
+        }
+        if (!conEmpresa.length) { sendJson(res, 401, { error: "Correo o clave incorrectos." }); return; }
+        const aprobadas = conEmpresa.filter((c) => c.empresa.aprobada !== false);
+        if (!aprobadas.length) {
+          // Ya probó que la clave es correcta -- informar el motivo real
+          // no es una filtración de datos ajenos.
+          sendJson(res, 403, { error: MSG_PENDIENTE, pendiente: true });
+          return;
+        }
+        let elegido = aprobadas[0];
+        if (aprobadas.length > 1) {
+          elegido = body.empresaId ? aprobadas.find((v) => v.companyId === body.empresaId) : null;
           if (!elegido) {
-            const empresas = [];
-            for (const v of validos) {
-              const e = await dbGetEmpresa(v.companyId);
-              if (e && e.activo !== false) empresas.push({ id: e.id, nombre: e.nombre });
-            }
-            sendJson(res, 200, { requiereSeleccion: true, empresas });
+            sendJson(res, 200, { requiereSeleccion: true, empresas: aprobadas.map((v) => ({ id: v.empresa.id, nombre: v.empresa.nombre })) });
             return;
           }
         }
-        const empresaElegida = await dbGetEmpresa(elegido.companyId);
-        if (!empresaElegida || empresaElegida.activo === false) { sendJson(res, 401, { error: "Correo o clave incorrectos." }); return; }
         const token = signToken({ sub: elegido.data.id, companyId: elegido.companyId });
-        sendJson(res, 200, { token, usuario: sanitizeUsuario(elegido.data), empresa: { id: empresaElegida.id, nombre: empresaElegida.nombre }, superAdmin: await esSuperAdmin(email) });
+        sendJson(res, 200, { token, usuario: sanitizeUsuario(elegido.data), empresa: { id: elegido.empresa.id, nombre: elegido.empresa.nombre }, superAdmin: await esSuperAdmin(email) });
         return;
       }
       const companyId = body.empresaId || "";
@@ -875,6 +889,7 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 401, { error: "Usuario o clave incorrectos." });
         return;
       }
+      if (empresa.aprobada === false) { sendJson(res, 403, { error: MSG_PENDIENTE, pendiente: true }); return; }
       const token = signToken({ sub: usuario.id, companyId });
       sendJson(res, 200, { token, usuario: sanitizeUsuario(usuario), empresa: { id: empresa.id, nombre: empresa.nombre }, superAdmin: await esSuperAdmin(usuario.email) });
       return;
@@ -883,9 +898,11 @@ const server = http.createServer(async (req, res) => {
     // Alta pública de empresa (autoservicio, sin sesión previa): crea la
     // empresa y su primer usuario administrador con el correo/clave que
     // ESA persona eligió (nunca la clave fija admin123 -- acá nadie sabe de
-    // antemano que tiene que cambiarla). Responde con el mismo shape que el
-    // login para dejarla adentro de la app de una vez, sin pedir un login
-    // aparte. Rate-limit simple por IP para frenar abuso trivial.
+    // antemano que tiene que cambiarla), pero NACE PENDIENTE DE APROBACIÓN
+    // (aprobada=false) -- no emite token ni deja entrar todavía, para que
+    // el dueño de la plataforma decida quién puede empezar a usarla de
+    // verdad. Un superAdmin la aprueba con POST /api/empresas/:id/aprobar.
+    // Rate-limit simple por IP para frenar abuso trivial.
     if (req.method === "POST" && parts[1] === "public" && parts[2] === "empresas" && parts[3] === "registro") {
       const ip = (req.headers["x-forwarded-for"] || "").split(",")[0].trim() || (req.socket && req.socket.remoteAddress) || "desconocida";
       if (!permitirRegistroPublico(ip)) {
@@ -905,11 +922,9 @@ const server = http.createServer(async (req, res) => {
       // mismo correo puede administrar varias empresas (ver login por
       // correo más arriba) -- cada empresa guarda su propio usuario/clave
       // para ese correo, de forma independiente.
-      const nueva = await dbCreateEmpresa(nombreEmpresa);
-      const { usuarioId } = await sembrarEmpresaNueva(nueva.id, { rut: body.rut, rubro: body.rubro, adminNombre, adminEmail, adminClave });
-      const usuarioCreado = await dbGetOne(nueva.id, "accesoUsuarios", usuarioId);
-      const token = signToken({ sub: usuarioId, companyId: nueva.id });
-      sendJson(res, 200, { token, usuario: sanitizeUsuario(usuarioCreado), empresa: { id: nueva.id, nombre: nueva.nombre }, superAdmin: await esSuperAdmin(adminEmail) });
+      const nueva = await dbCreateEmpresa(nombreEmpresa, false);
+      await sembrarEmpresaNueva(nueva.id, { rut: body.rut, rubro: body.rubro, adminNombre, adminEmail, adminClave });
+      sendJson(res, 200, { pendiente: true, empresa: { id: nueva.id, nombre: nueva.nombre } });
       return;
     }
 
@@ -947,6 +962,23 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       sendJson(res, 200, await dbListEmpresas());
+      return;
+    }
+
+    // Aprobar una empresa registrada desde afuera (POST /api/public/empresas/registro
+    // la crea pendiente -- ver ahí): exclusivo de superAdmin. Se chequea
+    // ANTES que "crear empresa" de abajo porque ese otro bloque solo mira
+    // parts[1]==="empresas" sin más, y matchearía esta ruta también.
+    if (req.method === "POST" && parts[1] === "empresas" && parts[2] && parts[3] === "aprobar") {
+      const email = await getCallerEmail(companyId, payload);
+      if (!(await esSuperAdmin(email))) {
+        sendJson(res, 403, { error: "Solo el administrador de la plataforma puede aprobar una empresa." });
+        return;
+      }
+      const objetivo = await dbGetEmpresa(parts[2]);
+      if (!objetivo) { sendJson(res, 404, { error: "Esa empresa no existe." }); return; }
+      await pool.query("UPDATE empresas SET aprobada = true WHERE id = $1", [parts[2]]);
+      sendJson(res, 200, { ok: true, empresa: { id: objetivo.id, nombre: objetivo.nombre } });
       return;
     }
 
