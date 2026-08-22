@@ -240,6 +240,50 @@ async function dbDeleteOne(companyId, store, id) {
 async function dbClearStore(companyId, store) {
   await pool.query("DELETE FROM records WHERE company_id = $1 AND store = $2", [companyId, store]);
 }
+// Única consulta que cruza empresas: busca accesoUsuarios por email en TODA
+// la instalación (usa el índice records_email_idx de schema.sql). Solo la
+// usa el login por correo -- nunca devuelve nombres de empresa antes de
+// validar la clave contra cada candidato (ver POST /api/auth/login).
+async function dbFindUsuariosPorEmail(email) {
+  const { rows } = await pool.query(
+    "SELECT company_id, data FROM records WHERE store = 'accesoUsuarios' AND lower(data->>'email') = $1",
+    [String(email).toLowerCase()]
+  );
+  return rows.map((r) => ({ companyId: r.company_id, data: r.data }));
+}
+
+// ---------- superAdmin (dueño de la plataforma) ----------
+// Vive en una tabla separada (platform_admins, ver schema.sql), FUERA de
+// STORES/STORES_SET -- ninguna ruta que el cliente pueda llamar (incluida
+// la genérica POST /api/accesoUsuarios) puede alcanzarla ni escribirla.
+// Solo se otorga con scripts/otorgar-superadmin.js, corrido a mano por
+// quien tiene acceso directo al servidor.
+async function esSuperAdmin(email) {
+  if (!email) return false;
+  const { rows } = await pool.query("SELECT 1 FROM platform_admins WHERE email = $1", [String(email).toLowerCase()]);
+  return rows.length > 0;
+}
+async function getCallerEmail(companyId, payload) {
+  const usuario = await dbGetOne(companyId, "accesoUsuarios", payload.sub);
+  return usuario && usuario.email ? String(usuario.email).toLowerCase() : null;
+}
+
+// ---------- límite simple de intentos de registro público (por IP) ----------
+// Sin CAPTCHA ni dependencias nuevas: solo frena el abuso trivial de
+// POST /api/public/empresas/registro (crear empresas en masa). Se reinicia
+// si el proceso se reinicia -- suficiente para este estado del producto,
+// no reemplaza una defensa anti-bot real si hiciera falta más adelante.
+const registroIntentosPorIp = new Map();
+const REGISTRO_MAX_POR_HORA = 5;
+function permitirRegistroPublico(ip) {
+  const ahora = Date.now();
+  const ventana = 60 * 60 * 1000;
+  const lista = (registroIntentosPorIp.get(ip) || []).filter((t) => ahora - t < ventana);
+  if (lista.length >= REGISTRO_MAX_POR_HORA) return false;
+  lista.push(ahora);
+  registroIntentosPorIp.set(ip, lista);
+  return true;
+}
 
 // ---------- redacción automática de documentos con IA ----------
 // Usa la API de mensajes de Anthropic (Claude) para redactar un borrador de
@@ -698,9 +742,17 @@ Redacta la descripción del hallazgo en 2 a 4 frases, en tono técnico y objetiv
 // base de datos nuevos en Render): crea los perfiles de acceso estándar, el
 // primer usuario administrador, el catálogo de protocolos de vigilancia de
 // salud y el checklist de compromisos, todo ya asociado al company_id de la
-// empresa recién creada. Devuelve el nombre del usuario/clave inicial para
-// mostrárselo una sola vez a quien la creó.
-async function sembrarEmpresaNueva(companyId, { rut, rubro } = {}) {
+// empresa recién creada.
+//
+// Sin adminNombre/adminEmail/adminClave (el flujo interno de Configuración,
+// ahora exclusivo de superAdmin), sigue sembrando el usuario/clave fijos de
+// siempre ("Administrador del sistema" / admin123) para no cambiar ese flujo.
+// Con esos datos (el registro público nuevo), siembra al administrador que
+// la empresa recién creada eligió, con SU correo y SU clave desde el
+// principio -- nunca la clave fija, porque acá nadie sabe de antemano que
+// tiene que cambiarla. Devuelve {usuarioId, nombreAdmin, claveAdmin} para
+// que cada caller arme la respuesta/token que necesite.
+async function sembrarEmpresaNueva(companyId, { rut, rubro, adminNombre, adminEmail, adminClave } = {}) {
   const perfilAdminId = crypto.randomUUID();
   const perfilPrevId = crypto.randomUUID();
   const perfilSupervisorId = crypto.randomUUID();
@@ -710,7 +762,12 @@ async function sembrarEmpresaNueva(companyId, { rut, rubro } = {}) {
   await dbUpsert(companyId, "accesoPerfiles", { id: perfilPrevId, nombre: "Prevencionista de Riesgos", esAdmin: false, vistas: TODAS_LAS_VISTAS.filter((v) => v !== "config") });
   await dbUpsert(companyId, "accesoPerfiles", { id: perfilSupervisorId, nombre: "Jefe de Obra / Supervisor", esAdmin: false, vistas: ["dashboard", "realizar-inspecciones", "inspecciones", "matriz", "programa", "capacitacion", "accidentabilidad", "emergencia", "compromisos"] });
   await dbUpsert(companyId, "accesoPerfiles", { id: perfilTrabajadorId, nombre: "Trabajador", esAdmin: false, descargaDashboard: false, vistas: ["dashboard", "realizar-inspecciones"] });
-  await dbUpsert(companyId, "accesoUsuarios", { id: crypto.randomUUID(), nombre: "Administrador del sistema", cargo: "Administrador", perfilId: perfilAdminId, claveHash: hashPassword("admin123"), activo: true });
+  const usuarioId = crypto.randomUUID();
+  const nombreAdmin = (adminNombre && String(adminNombre).trim()) || "Administrador del sistema";
+  const claveAdmin = adminClave || "admin123";
+  const usuarioAdmin = { id: usuarioId, nombre: nombreAdmin, cargo: "Administrador", perfilId: perfilAdminId, claveHash: hashPassword(claveAdmin), activo: true };
+  if (adminEmail) usuarioAdmin.email = String(adminEmail).trim().toLowerCase();
+  await dbUpsert(companyId, "accesoUsuarios", usuarioAdmin);
 
   const PROTOCOLOS_DEFECTO = [
     { id: "prexor", nombre: "PREXOR", agente: "Ruido (exposición ocupacional)", periodicidadMeses: 12 },
@@ -733,6 +790,7 @@ async function sembrarEmpresaNueva(companyId, { rut, rubro } = {}) {
 
   const empresaRow = await dbGetEmpresa(companyId);
   await dbUpsert(companyId, "empresa", { id: "empresa-1", razonSocial: (empresaRow && empresaRow.nombre) || "", rut: rut || "Por definir", rubro: rubro || "" });
+  return { usuarioId, nombreAdmin, claveAdmin };
 }
 
 // ---------- arranque: garantiza que exista al menos una empresa y un admin ----------
@@ -762,22 +820,53 @@ const server = http.createServer(async (req, res) => {
 
     if (parts[0] !== "api") { sendJson(res, 404, { error: "No encontrado." }); return; }
 
-    // --- Endpoints públicos (sin autenticación): elegir empresa y ver sus usuarios ---
-    if (req.method === "GET" && parts[1] === "public" && parts[2] === "empresas") {
-      const empresas = await dbListEmpresas();
-      sendJson(res, 200, empresas);
-      return;
-    }
-    if (req.method === "GET" && parts[1] === "public" && parts[2] === "usuarios") {
-      const companyId = url.searchParams.get("empresaId") || "";
-      const empresa = companyId ? await dbGetEmpresa(companyId) : null;
-      if (!empresa || empresa.activo === false) { sendJson(res, 404, { error: "Empresa no encontrada." }); return; }
-      const usuarios = await dbGetAll(companyId, "accesoUsuarios");
-      sendJson(res, 200, usuarios.map((u) => ({ id: u.id, nombre: u.nombre, cargo: u.cargo, activo: u.activo })));
-      return;
-    }
+    // --- Endpoints públicos (sin autenticación) ---
+    // NOTA: ya NO existe un listado público de empresas ni de usuarios --
+    // desde que Pehuén vende acceso directo a empresas sin relación entre
+    // sí, ninguna solicitud sin sesión puede enterarse de qué otras
+    // empresas o usuarios existen en la instalación. El login por correo
+    // de abajo es la única consulta que cruza empresas, y solo compara
+    // contraseñas (nunca devuelve nombres antes de validar la clave).
+
+    // Login: acepta DOS formas.
+    // 1) {email, clave} (nueva, recomendada): busca ese correo en TODA la
+    //    instalación (dbFindUsuariosPorEmail) y valida la clave contra cada
+    //    candidato encontrado -- si calza en más de una empresa (un mismo
+    //    correo puede administrar varias, caso real), no emite token: pide
+    //    elegir cuál con {requiereSeleccion:true, empresas:[...]} usando
+    //    SOLO esas empresas ya autenticadas por clave, nunca el listado
+    //    completo. El cliente reenvía {email, clave, empresaId} para
+    //    terminar de iniciar sesión en esa empresa puntual.
+    // 2) {empresaId, usuarioId, clave} (la de siempre, SIN cambios): se
+    //    mantiene para que los clientes reales de hoy, que todavía no
+    //    tienen correo cargado, sigan entrando exactamente igual.
     if (req.method === "POST" && parts[1] === "auth" && parts[2] === "login") {
       const body = (await readBody(req)) || {};
+      if (body.email) {
+        const email = String(body.email).trim().toLowerCase();
+        const clave = body.clave || "";
+        const candidatos = await dbFindUsuariosPorEmail(email);
+        const validos = candidatos.filter((c) => c.data.activo !== false && verifyPassword(clave, c.data.claveHash));
+        if (!validos.length) { sendJson(res, 401, { error: "Correo o clave incorrectos." }); return; }
+        let elegido = validos[0];
+        if (validos.length > 1) {
+          elegido = body.empresaId ? validos.find((v) => v.companyId === body.empresaId) : null;
+          if (!elegido) {
+            const empresas = [];
+            for (const v of validos) {
+              const e = await dbGetEmpresa(v.companyId);
+              if (e && e.activo !== false) empresas.push({ id: e.id, nombre: e.nombre });
+            }
+            sendJson(res, 200, { requiereSeleccion: true, empresas });
+            return;
+          }
+        }
+        const empresaElegida = await dbGetEmpresa(elegido.companyId);
+        if (!empresaElegida || empresaElegida.activo === false) { sendJson(res, 401, { error: "Correo o clave incorrectos." }); return; }
+        const token = signToken({ sub: elegido.data.id, companyId: elegido.companyId });
+        sendJson(res, 200, { token, usuario: sanitizeUsuario(elegido.data), empresa: { id: empresaElegida.id, nombre: empresaElegida.nombre }, superAdmin: await esSuperAdmin(email) });
+        return;
+      }
       const companyId = body.empresaId || "";
       const empresa = companyId ? await dbGetEmpresa(companyId) : null;
       if (!empresa || empresa.activo === false) { sendJson(res, 401, { error: "Empresa no encontrada." }); return; }
@@ -787,7 +876,40 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       const token = signToken({ sub: usuario.id, companyId });
-      sendJson(res, 200, { token, usuario: sanitizeUsuario(usuario), empresa: { id: empresa.id, nombre: empresa.nombre } });
+      sendJson(res, 200, { token, usuario: sanitizeUsuario(usuario), empresa: { id: empresa.id, nombre: empresa.nombre }, superAdmin: await esSuperAdmin(usuario.email) });
+      return;
+    }
+
+    // Alta pública de empresa (autoservicio, sin sesión previa): crea la
+    // empresa y su primer usuario administrador con el correo/clave que
+    // ESA persona eligió (nunca la clave fija admin123 -- acá nadie sabe de
+    // antemano que tiene que cambiarla). Responde con el mismo shape que el
+    // login para dejarla adentro de la app de una vez, sin pedir un login
+    // aparte. Rate-limit simple por IP para frenar abuso trivial.
+    if (req.method === "POST" && parts[1] === "public" && parts[2] === "empresas" && parts[3] === "registro") {
+      const ip = (req.headers["x-forwarded-for"] || "").split(",")[0].trim() || (req.socket && req.socket.remoteAddress) || "desconocida";
+      if (!permitirRegistroPublico(ip)) {
+        sendJson(res, 429, { error: "Demasiados intentos de registro desde esta conexión. Intenta de nuevo más tarde." });
+        return;
+      }
+      const body = (await readBody(req)) || {};
+      const nombreEmpresa = String(body.nombre || "").trim();
+      const adminNombre = String(body.adminNombre || "").trim();
+      const adminEmail = String(body.adminEmail || "").trim().toLowerCase();
+      const adminClave = String(body.adminClave || "");
+      if (!nombreEmpresa) { sendJson(res, 400, { error: "Indica el nombre de tu empresa." }); return; }
+      if (!adminNombre) { sendJson(res, 400, { error: "Indica tu nombre." }); return; }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(adminEmail)) { sendJson(res, 400, { error: "Indica un correo válido." }); return; }
+      if (adminClave.length < 8) { sendJson(res, 400, { error: "La clave debe tener al menos 8 caracteres." }); return; }
+      // A propósito NO se rechaza un correo ya usado en otra empresa: un
+      // mismo correo puede administrar varias empresas (ver login por
+      // correo más arriba) -- cada empresa guarda su propio usuario/clave
+      // para ese correo, de forma independiente.
+      const nueva = await dbCreateEmpresa(nombreEmpresa);
+      const { usuarioId } = await sembrarEmpresaNueva(nueva.id, { rut: body.rut, rubro: body.rubro, adminNombre, adminEmail, adminClave });
+      const usuarioCreado = await dbGetOne(nueva.id, "accesoUsuarios", usuarioId);
+      const token = signToken({ sub: usuarioId, companyId: nueva.id });
+      sendJson(res, 200, { token, usuario: sanitizeUsuario(usuarioCreado), empresa: { id: nueva.id, nombre: nueva.nombre }, superAdmin: await esSuperAdmin(adminEmail) });
       return;
     }
 
@@ -797,53 +919,84 @@ const server = http.createServer(async (req, res) => {
     if (!payload) { sendJson(res, 401, { error: "Sesión inválida o expirada. Vuelve a iniciar sesión." }); return; }
     const companyId = payload.companyId;
 
-    // Crear una empresa nueva: solo un usuario con perfil de administrador
-    // (de cualquier empresa ya existente) puede hacerlo. Esto reemplaza el
-    // proceso manual de desplegar un servidor y una base de datos nuevos:
-    // ahora es un formulario dentro de Configuración.
+    // Estado de la sesión actual: a qué usuario/empresa pertenece este
+    // token (así el frontend no necesita cachear nada en localStorage más
+    // que el token mismo -- la fuente de verdad es siempre el servidor) y
+    // si es superAdmin frente a la plataforma. superAdmin se recalcula en
+    // cada llamada contra platform_admins, nunca se mete en el token -- así
+    // revocarlo es inmediato, sin esperar 14 días a que expire un token ya
+    // emitido.
+    if (req.method === "GET" && parts[1] === "me") {
+      const empresaActual = await dbGetEmpresa(companyId);
+      const email = await getCallerEmail(companyId, payload);
+      sendJson(res, 200, {
+        usuarioId: payload.sub,
+        empresa: empresaActual ? { id: empresaActual.id, nombre: empresaActual.nombre } : null,
+        superAdmin: await esSuperAdmin(email),
+      });
+      return;
+    }
+
+    // Listado completo de empresas: reemplaza al antiguo GET /api/public/empresas
+    // (ahora cerrado) para la tabla de Configuración -- exclusivo de
+    // superAdmin, igual criterio que crear/eliminar cualquier empresa.
+    if (req.method === "GET" && parts[1] === "empresas") {
+      const email = await getCallerEmail(companyId, payload);
+      if (!(await esSuperAdmin(email))) {
+        sendJson(res, 403, { error: "Solo el administrador de la plataforma puede ver el listado completo de empresas." });
+        return;
+      }
+      sendJson(res, 200, await dbListEmpresas());
+      return;
+    }
+
+    // Crear una empresa nueva DESDE ADENTRO de la app (Configuración): a
+    // diferencia del registro público (que es la puerta de entrada para
+    // clientes nuevos), esto es un privilegio de alcance de toda la
+    // plataforma -- crear una empresa no es "gestionar la mía propia" --
+    // así que ahora es exclusivo de superAdmin, no de cualquier esAdmin.
     if (req.method === "POST" && parts[1] === "empresas") {
-      const perfiles = await dbGetAll(companyId, "accesoPerfiles");
-      const usuarioActual = await dbGetOne(companyId, "accesoUsuarios", payload.sub);
-      const perfilActual = usuarioActual && perfiles.find((p) => p.id === usuarioActual.perfilId);
-      if (!perfilActual || perfilActual.esAdmin !== true) {
-        sendJson(res, 403, { error: "Solo un administrador puede crear una empresa nueva." });
+      const email = await getCallerEmail(companyId, payload);
+      if (!(await esSuperAdmin(email))) {
+        sendJson(res, 403, { error: "Solo el administrador de la plataforma puede crear una empresa nueva desde aquí." });
         return;
       }
       const body = (await readBody(req)) || {};
       if (!body.nombre || !String(body.nombre).trim()) { sendJson(res, 400, { error: "Debes indicar el nombre de la nueva empresa." }); return; }
       const nueva = await dbCreateEmpresa(String(body.nombre).trim());
-      await sembrarEmpresaNueva(nueva.id, { rut: body.rut, rubro: body.rubro });
-      sendJson(res, 200, { empresa: nueva, usuarioInicial: "Administrador del sistema", claveInicial: "admin123" });
+      const { nombreAdmin, claveAdmin } = await sembrarEmpresaNueva(nueva.id, { rut: body.rut, rubro: body.rubro });
+      sendJson(res, 200, { empresa: nueva, usuarioInicial: nombreAdmin, claveInicial: claveAdmin });
       return;
     }
 
-    // Eliminar una empresa por completo: solo un administrador (de
-    // cualquier empresa ya existente, mismo criterio que para crear una
-    // empresa nueva) puede hacerlo. Es IRREVERSIBLE -- borra en cascada
-    // absolutamente todos los datos de esa empresa. Dos resguardos: no
-    // se puede eliminar la empresa con la que se inició sesión ahora
-    // mismo (para no quedar a medio camino de una sesión inválida), ni
-    // la última empresa que quede en toda la instalación.
+    // Eliminar una empresa por completo. Es IRREVERSIBLE -- borra en
+    // cascada absolutamente todos los datos de esa empresa. Regla nueva
+    // (reemplaza la anterior, que era exactamente al revés):
+    //   - superAdmin: puede eliminar CUALQUIER empresa (dar de baja un
+    //     cliente, por ejemplo).
+    //   - administrador normal (esAdmin, no superAdmin): SOLO puede
+    //     eliminar su propia empresa (la del token con el que inició
+    //     sesión) -- cerrar su propia cuenta si así lo decide. Cualquier
+    //     otro id, 403.
     if (req.method === "DELETE" && parts[1] === "empresas" && parts[2]) {
-      const perfiles = await dbGetAll(companyId, "accesoPerfiles");
-      const usuarioActual = await dbGetOne(companyId, "accesoUsuarios", payload.sub);
-      const perfilActual = usuarioActual && perfiles.find((p) => p.id === usuarioActual.perfilId);
-      if (!perfilActual || perfilActual.esAdmin !== true) {
-        sendJson(res, 403, { error: "Solo un administrador puede eliminar una empresa." });
-        return;
-      }
       const targetId = parts[2];
-      if (targetId === companyId) {
-        sendJson(res, 400, { error: "No puedes eliminar la empresa con la que iniciaste sesión ahora mismo. Cambia a otra empresa e inténtalo de nuevo." });
-        return;
+      const email = await getCallerEmail(companyId, payload);
+      const esSuper = await esSuperAdmin(email);
+      if (!esSuper) {
+        const perfiles = await dbGetAll(companyId, "accesoPerfiles");
+        const usuarioActual = await dbGetOne(companyId, "accesoUsuarios", payload.sub);
+        const perfilActual = usuarioActual && perfiles.find((p) => p.id === usuarioActual.perfilId);
+        if (!perfilActual || perfilActual.esAdmin !== true) {
+          sendJson(res, 403, { error: "Solo un administrador puede eliminar una empresa." });
+          return;
+        }
+        if (targetId !== companyId) {
+          sendJson(res, 403, { error: "Solo puedes eliminar tu propia empresa." });
+          return;
+        }
       }
       const objetivo = await dbGetEmpresa(targetId);
       if (!objetivo) { sendJson(res, 404, { error: "Esa empresa no existe (puede que ya se haya eliminado)." }); return; }
-      const todas = await dbListEmpresas();
-      if (todas.length <= 1) {
-        sendJson(res, 400, { error: "No puedes eliminar la última empresa de la instalación." });
-        return;
-      }
       await dbDeleteEmpresa(targetId);
       sendJson(res, 200, { ok: true, eliminada: { id: objetivo.id, nombre: objetivo.nombre } });
       return;
@@ -988,6 +1141,15 @@ const server = http.createServer(async (req, res) => {
         const existing = await dbGetOne(companyId, store, body.id);
         toStore = Object.assign({}, body);
         delete toStore.clave;
+        delete toStore.superAdmin; // nunca escribible desde este endpoint genérico, bajo ninguna circunstancia
+        if (toStore.email) {
+          toStore.email = String(toStore.email).trim().toLowerCase();
+          const otros = await dbGetAll(companyId, store);
+          if (otros.some((u) => u.id !== body.id && u.email === toStore.email)) {
+            sendJson(res, 400, { error: "Ya hay otro usuario de esta empresa con ese correo." });
+            return;
+          }
+        }
         if (body.clave) {
           toStore.claveHash = hashPassword(body.clave);
         } else if (existing && existing.claveHash) {

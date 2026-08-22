@@ -85,6 +85,24 @@ END $$;
 CREATE INDEX IF NOT EXISTS idx_records_company_store ON records(company_id, store);
 DROP INDEX IF EXISTS idx_records_store;
 
+-- Login por correo (multiempresa pública): un mismo correo puede existir en
+-- más de una empresa (por ejemplo, alguien que administra varios clientes),
+-- así que a propósito NO es un índice único -- solo acelera la búsqueda de
+-- POST /api/auth/login con {email, clave}, que recorre TODA la instalación
+-- (la única consulta que cruza empresas). La unicidad DENTRO de una misma
+-- empresa se valida en server.js, no acá.
+CREATE INDEX IF NOT EXISTS records_email_idx ON records ((lower(data->>'email'))) WHERE store = 'accesoUsuarios';
+
+-- Dueño(s) de la plataforma (superAdmin): a propósito una tabla separada,
+-- fuera de "records"/STORES -- ninguna ruta que el cliente pueda llamar
+-- (incluida la genérica POST /api/<store>) puede alcanzarla ni escribirla.
+-- Se otorga/revoca a mano con scripts/otorgar-superadmin.js y
+-- scripts/revocar-superadmin.js, corridos por quien tiene acceso directo
+-- al servidor -- nunca existe como llamada HTTP.
+CREATE TABLE IF NOT EXISTS platform_admins (
+  email TEXT PRIMARY KEY
+);
+
 -- Catálogo de Proceso/Actividad/Categoría/Peligro compartido por Rubro:
 -- a diferencia de "records", esta tabla NO está aislada por company_id a
 -- propósito -- es la única pensada para compartirse entre empresas que
