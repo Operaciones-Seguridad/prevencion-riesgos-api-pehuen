@@ -308,6 +308,17 @@ function permitirRegistroPublico(ip) {
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
 const ANTHROPIC_MODEL = "claude-sonnet-5";
 
+// Los prompts piden texto plano, pero el modelo a veces igual devuelve
+// sintaxis Markdown (##, **negrita**) que termina imprimiéndose literal en
+// el PDF/textarea ("#### Objetivo" en vez de "Objetivo"). Se limpia acá,
+// una sola vez, para las tres funciones que devuelven prosa larga.
+function limpiarMarkdownIA(texto) {
+  return String(texto || "")
+    .split("\n")
+    .map((linea) => linea.replace(/^\s*#{1,6}\s*/, "").replace(/\*\*(.*?)\*\*/g, "$1").replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, "$1"))
+    .join("\n");
+}
+
 const TIPO_DOC_LABEL_IA = { politica: "una Política de Seguridad y Salud en el Trabajo (SST)", procedimiento: "un Procedimiento o Instructivo de trabajo seguro", manual: "un Manual del sistema de gestión de prevención de riesgos" };
 
 // Mismo cálculo de nivel de riesgo que usa el frontend (index.html: nivelRiesgo).
@@ -401,7 +412,7 @@ ${perfilRiesgos || "  Sin líneas registradas todavía en la Matriz de riesgos."
 - Focos críticos de accidentabilidad registrados: ${focosCriticos || "no registrados"}
 - Historial real de accidentes/incidentes: ${resumenAccidentes}
 ${riesgosEspecificos ? `\nEste documento está registrado en la Matriz de riesgos como medida de control administrativo (jerarquía D, DS 44) para estas líneas específicas -- el contenido DEBE cubrir en detalle exactamente estos peligros y riesgos, con los pasos/medidas concretas para controlarlos:\n${riesgosEspecificos}\n` : ""}
-Redacta el contenido en español de Chile, en formato de texto plano con títulos numerados (1. Objetivo, 2. Alcance, 3. ...), listo para pegar directamente en el campo "Contenido" del documento. No agregues portada, tabla de control de versiones ni hoja de firmas (eso ya lo genera la app por separado). Sé concreto y aterrizado a los datos reales indicados arriba (rubro, áreas, riesgos, focos críticos), no genérico.`;
+Redacta el contenido en español de Chile, en formato de texto plano con títulos numerados (1. Objetivo, 2. Alcance, 3. ...), listo para pegar directamente en el campo "Contenido" del documento. No uses sintaxis Markdown (nada de #, ##, **, _) -- los títulos van solo como "1. Objetivo", sin símbolos antes ni después. No agregues portada, tabla de control de versiones ni hoja de firmas (eso ya lo genera la app por separado). Sé concreto y aterrizado a los datos reales indicados arriba (rubro, áreas, riesgos, focos críticos), no genérico.`;
 
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -424,7 +435,7 @@ Redacta el contenido en español de Chile, en formato de texto plano con título
     throw err;
   }
   const data = await res.json();
-  const texto = (data.content || []).map((b) => b.text || "").join("\n").trim();
+  const texto = limpiarMarkdownIA((data.content || []).map((b) => b.text || "").join("\n").trim());
   if (!texto) {
     const err = new Error("El servicio de IA no devolvió contenido.");
     err.statusCode = 502;
@@ -440,16 +451,19 @@ Redacta el contenido en español de Chile, en formato de texto plano con título
 // a trabajar. Mismo patrón que redactarDocumentoConIA: el prompt se arma con
 // los riesgos reales de la Matriz para las áreas del cargo (no genéricos), y
 // el resultado se revisa/edita en el frontend antes de guardar.
+function normCargoIA(s) { return String(s || "").toLowerCase().replace(/\s+/g, " ").trim(); }
+
 async function redactarIrlConIA(companyId, { cargo, areaIds, contextoAdicional }) {
   if (!ANTHROPIC_API_KEY) {
     const err = new Error("La redacción con IA no está configurada en este servidor: falta la variable de entorno ANTHROPIC_API_KEY.");
     err.statusCode = 500;
     throw err;
   }
-  const [empresa, areas, matriz] = await Promise.all([
+  const [empresa, areas, matriz, estudioEpp] = await Promise.all([
     dbGetAll(companyId, "empresa"),
     dbGetAll(companyId, "areas"),
     dbGetAll(companyId, "matriz"),
+    dbGetAll(companyId, "estudioEpp"),
   ]);
   const razonSocial = (empresa[0] && empresa[0].razonSocial) || "la empresa";
   const rubro = (empresa[0] && empresa[0].rubro) || "no especificado";
@@ -465,7 +479,15 @@ async function redactarIrlConIA(companyId, { cargo, areaIds, contextoAdicional }
     .map((m) => `- [${nivelRiesgoIA(m.probabilidad, m.consecuencia)}] ${areaNombre(m.areaId) || "Sin área"}: ${m.peligro || "peligro sin describir"} → ${m.riesgo || "riesgo sin describir"}. Controles ya definidos: ${m.controles || "sin controles definidos aún"}`)
     .join("\n");
 
-  const prompt = `Eres un prevencionista de riesgos experto en normativa chilena (Ley N°16.744, DS N°44/2024). Redacta el contenido completo de la "Obligación de Informar los Riesgos Laborales" (IRL/ODI) que la empresa debe entregar por escrito a cada trabajador del cargo indicado, conforme al DS N°44/2024 y al artículo 66 de la Ley N°16.744, ANTES de que empiece a desempeñar sus funciones.
+  // El listado de riesgos y el de EPP se imprimen aparte como tablas reales
+  // (matriz de riesgos y Estudio de necesidad de EPP, respectivamente) --
+  // se le avisa al modelo para que no los repita como prosa y en cambio
+  // los use solo como contexto para las medidas preventivas y métodos de
+  // trabajo correcto.
+  const eppDelCargo = estudioEpp.filter((r) => normCargoIA(r.cargo) === normCargoIA(cargo));
+  const eppTexto = eppDelCargo.map((r) => `- Ante "${r.peligro || "peligro sin describir"}": ${r.epp || "EPP sin especificar"}`).join("\n");
+
+  const prompt = `Eres un prevencionista de riesgos experto en normativa chilena (Ley N°16.744, DS N°44/2024). Redacta el contenido de la "Obligación de Informar los Riesgos Laborales" (IRL/ODI) que la empresa debe entregar por escrito a cada trabajador del cargo indicado, conforme al DS N°44/2024 y al artículo 66 de la Ley N°16.744, ANTES de que empiece a desempeñar sus funciones.
 
 - Razón social: ${razonSocial}
 - Rubro: ${rubro}
@@ -473,17 +495,18 @@ async function redactarIrlConIA(companyId, { cargo, areaIds, contextoAdicional }
 - Áreas/procesos donde se desempeña este cargo: ${nombresAreas}
 ${contextoAdicional ? `- Contexto adicional indicado por el usuario: ${contextoAdicional}` : ""}
 
-Riesgos reales ya identificados en la Matriz de riesgos de la empresa para esas áreas (de mayor a menor nivel) -- el IRL debe cubrir estos riesgos específicos, no hablar en términos genéricos:
+Riesgos reales ya identificados en la Matriz de riesgos de la empresa para esas áreas (de mayor a menor nivel) -- el documento final los imprime aparte como una tabla, así que NO los repitas uno por uno como texto; úsalos solo para que las medidas preventivas y métodos de trabajo que redactes sean específicos, no genéricos:
 ${perfilRiesgos || "  Sin líneas registradas todavía en la Matriz de riesgos para estas áreas -- redacta igual un IRL razonable para un cargo de este tipo en este rubro, dejando explícito que debe complementarse cuando se cargue la Matriz de riesgos de estas áreas."}
+
+EPP ya definido para este cargo en el Estudio de necesidad de EPP (el documento final también lo imprime aparte como tabla -- NO lo repitas como texto, es solo contexto):
+${eppTexto || "  Sin EPP definido todavía para este cargo en el Estudio de necesidad de EPP."}
 
 Redacta en español de Chile, en formato de texto plano con títulos numerados, cubriendo obligatoriamente:
 1. Identificación del cargo y áreas donde se desempeña.
-2. Riesgos específicos asociados a las tareas del cargo (uno por uno, con su consecuencia posible).
-3. Medidas preventivas para cada riesgo.
-4. Métodos de trabajo correcto / procedimientos seguros a seguir.
-5. Elementos de protección personal (EPP) requeridos para el cargo.
-6. Declaración final de que el trabajador fue informado antes de iniciar sus funciones, con espacio para firma y fecha (solo el texto de la declaración, no dibujes una tabla de firma -- eso lo agrega la app por separado).
-No agregues portada ni numeración de páginas (eso ya lo genera la app). Sé concreto y aterrizado a los riesgos reales indicados arriba, no genérico.`;
+2. Medidas preventivas generales para los riesgos de este cargo (aterrizadas a los riesgos reales de arriba, sin repetirlos uno por uno).
+3. Métodos de trabajo correcto / procedimientos seguros a seguir.
+4. Declaración final de que el trabajador fue informado antes de iniciar sus funciones (solo el texto de la declaración, sin dibujar tabla de firma ni de EPP -- eso lo agrega la app por separado).
+No agregues portada, tabla de EPP, lista de riesgos ni numeración de páginas (eso ya lo genera la app). No uses sintaxis Markdown (nada de #, ##, **, _) -- los títulos van solo como "1. Identificación del cargo", sin símbolos antes ni después. Sé concreto y aterrizado a los datos reales indicados arriba, no genérico.`;
 
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -506,7 +529,7 @@ No agregues portada ni numeración de páginas (eso ya lo genera la app). Sé co
     throw err;
   }
   const data = await res.json();
-  const texto = (data.content || []).map((b) => b.text || "").join("\n").trim();
+  const texto = limpiarMarkdownIA((data.content || []).map((b) => b.text || "").join("\n").trim());
   if (!texto) {
     const err = new Error("El servicio de IA no devolvió contenido.");
     err.statusCode = 502;
@@ -815,7 +838,7 @@ Redacta la descripción del hallazgo en 2 a 4 frases, en tono técnico y objetiv
     throw err;
   }
   const data = await res.json();
-  const descripcion = (data.content || []).map((b) => b.text || "").join("\n").trim();
+  const descripcion = limpiarMarkdownIA((data.content || []).map((b) => b.text || "").join("\n").trim());
   if (!descripcion) {
     const err = new Error("El servicio de IA no devolvió contenido.");
     err.statusCode = 502;
