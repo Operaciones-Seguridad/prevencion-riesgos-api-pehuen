@@ -55,6 +55,7 @@ const STORES = [
   "accesoUsuarios", "levantamientos", "compromisosItems", "compromisosRegistros",
   "planAccionMatriz", "eppStock", "accInvestigaciones", "ds44Obligaciones", "ds44Cumplimiento",
   "cursosObligatorios", "trabajadorCursos", "ds67Evaluaciones", "cphysAcuerdos",
+  "irlCargos", "irlEntregas", "riohysEntregas",
 ];
 const STORES_SET = new Set(STORES);
 
@@ -401,6 +402,88 @@ ${perfilRiesgos || "  Sin líneas registradas todavía en la Matriz de riesgos."
 - Historial real de accidentes/incidentes: ${resumenAccidentes}
 ${riesgosEspecificos ? `\nEste documento está registrado en la Matriz de riesgos como medida de control administrativo (jerarquía D, DS 44) para estas líneas específicas -- el contenido DEBE cubrir en detalle exactamente estos peligros y riesgos, con los pasos/medidas concretas para controlarlos:\n${riesgosEspecificos}\n` : ""}
 Redacta el contenido en español de Chile, en formato de texto plano con títulos numerados (1. Objetivo, 2. Alcance, 3. ...), listo para pegar directamente en el campo "Contenido" del documento. No agregues portada, tabla de control de versiones ni hoja de firmas (eso ya lo genera la app por separado). Sé concreto y aterrizado a los datos reales indicados arriba (rubro, áreas, riesgos, focos críticos), no genérico.`;
+
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": ANTHROPIC_API_KEY,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: ANTHROPIC_MODEL,
+      max_tokens: 4096,
+      messages: [{ role: "user", content: prompt }],
+    }),
+  });
+  if (!res.ok) {
+    let detail = "";
+    try { detail = (await res.json()).error?.message || ""; } catch (e) {}
+    const err = new Error(detail || `El servicio de IA respondió con un error (${res.status}).`);
+    err.statusCode = 502;
+    throw err;
+  }
+  const data = await res.json();
+  const texto = (data.content || []).map((b) => b.text || "").join("\n").trim();
+  if (!texto) {
+    const err = new Error("El servicio de IA no devolvió contenido.");
+    err.statusCode = 502;
+    throw err;
+  }
+  return texto;
+}
+
+// ---------- Obligación de Informar los Riesgos Laborales (IRL) por cargo ----------
+// DS N°44/2024, y Ley N°16.744 art. 66: el empleador debe informar oportuna
+// y convenientemente a todos los trabajadores de los riesgos de su puesto, las
+// medidas preventivas y los métodos de trabajo correcto, antes de que empiecen
+// a trabajar. Mismo patrón que redactarDocumentoConIA: el prompt se arma con
+// los riesgos reales de la Matriz para las áreas del cargo (no genéricos), y
+// el resultado se revisa/edita en el frontend antes de guardar.
+async function redactarIrlConIA(companyId, { cargo, areaIds, contextoAdicional }) {
+  if (!ANTHROPIC_API_KEY) {
+    const err = new Error("La redacción con IA no está configurada en este servidor: falta la variable de entorno ANTHROPIC_API_KEY.");
+    err.statusCode = 500;
+    throw err;
+  }
+  const [empresa, areas, matriz] = await Promise.all([
+    dbGetAll(companyId, "empresa"),
+    dbGetAll(companyId, "areas"),
+    dbGetAll(companyId, "matriz"),
+  ]);
+  const razonSocial = (empresa[0] && empresa[0].razonSocial) || "la empresa";
+  const rubro = (empresa[0] && empresa[0].rubro) || "no especificado";
+  const areaNombre = (id) => (areas.find((a) => a.id === id) || {}).nombre || "";
+  const areaIdsSet = new Set(Array.isArray(areaIds) ? areaIds : []);
+  const nombresAreas = [...areaIdsSet].map(areaNombre).filter(Boolean).join(", ") || "no especificadas";
+
+  const lineasCargo = areaIdsSet.size ? matriz.filter((m) => areaIdsSet.has(m.areaId)) : matriz;
+  const perfilRiesgos = lineasCargo
+    .slice()
+    .sort((a, b) => (b.probabilidad || 0) * (b.consecuencia || 0) - (a.probabilidad || 0) * (a.consecuencia || 0))
+    .slice(0, 20)
+    .map((m) => `- [${nivelRiesgoIA(m.probabilidad, m.consecuencia)}] ${areaNombre(m.areaId) || "Sin área"}: ${m.peligro || "peligro sin describir"} → ${m.riesgo || "riesgo sin describir"}. Controles ya definidos: ${m.controles || "sin controles definidos aún"}`)
+    .join("\n");
+
+  const prompt = `Eres un prevencionista de riesgos experto en normativa chilena (Ley N°16.744, DS N°44/2024). Redacta el contenido completo de la "Obligación de Informar los Riesgos Laborales" (IRL/ODI) que la empresa debe entregar por escrito a cada trabajador del cargo indicado, conforme al DS N°44/2024 y al artículo 66 de la Ley N°16.744, ANTES de que empiece a desempeñar sus funciones.
+
+- Razón social: ${razonSocial}
+- Rubro: ${rubro}
+- Cargo/puesto: "${cargo}"
+- Áreas/procesos donde se desempeña este cargo: ${nombresAreas}
+${contextoAdicional ? `- Contexto adicional indicado por el usuario: ${contextoAdicional}` : ""}
+
+Riesgos reales ya identificados en la Matriz de riesgos de la empresa para esas áreas (de mayor a menor nivel) -- el IRL debe cubrir estos riesgos específicos, no hablar en términos genéricos:
+${perfilRiesgos || "  Sin líneas registradas todavía en la Matriz de riesgos para estas áreas -- redacta igual un IRL razonable para un cargo de este tipo en este rubro, dejando explícito que debe complementarse cuando se cargue la Matriz de riesgos de estas áreas."}
+
+Redacta en español de Chile, en formato de texto plano con títulos numerados, cubriendo obligatoriamente:
+1. Identificación del cargo y áreas donde se desempeña.
+2. Riesgos específicos asociados a las tareas del cargo (uno por uno, con su consecuencia posible).
+3. Medidas preventivas para cada riesgo.
+4. Métodos de trabajo correcto / procedimientos seguros a seguir.
+5. Elementos de protección personal (EPP) requeridos para el cargo.
+6. Declaración final de que el trabajador fue informado antes de iniciar sus funciones, con espacio para firma y fecha (solo el texto de la declaración, no dibujes una tabla de firma -- eso lo agrega la app por separado).
+No agregues portada ni numeración de páginas (eso ya lo genera la app). Sé concreto y aterrizado a los riesgos reales indicados arriba, no genérico.`;
 
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -1091,6 +1174,18 @@ const server = http.createServer(async (req, res) => {
       if (!body.tipo || !body.nombre) { sendJson(res, 400, { error: "Debes indicar el tipo y el nombre del documento." }); return; }
       try {
         const contenido = await redactarDocumentoConIA(companyId, body);
+        sendJson(res, 200, { contenido });
+      } catch (err) {
+        sendJson(res, err.statusCode || 500, { error: err.message });
+      }
+      return;
+    }
+
+    if (req.method === "POST" && parts[1] === "ia" && parts[2] === "redactar-irl") {
+      const body = (await readBody(req)) || {};
+      if (!body.cargo) { sendJson(res, 400, { error: "Debes indicar el cargo." }); return; }
+      try {
+        const contenido = await redactarIrlConIA(companyId, body);
         sendJson(res, 200, { contenido });
       } catch (err) {
         sendJson(res, err.statusCode || 500, { error: err.message });
