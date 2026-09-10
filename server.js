@@ -889,6 +889,35 @@ async function sembrarEmpresaNueva(companyId, { rut, rubro, adminNombre, adminEm
   ];
   for (const p of PROTOCOLOS_DEFECTO) await dbUpsert(companyId, "protocolos", p);
 
+  // Basado en la guía "Control de peligros en el izaje de cargas con grúas
+  // móviles" de Mutual de Seguridad CChC (NCh 1258/1 y /2, ASME B30.5-2011,
+  // OSHA 29CFR1926 subparte CC) -- ver el mismo formato en index.html
+  // (CHECKLIST_IZAJE_CARGA), agregado ahí para empresas ya existentes.
+  await dbUpsert(companyId, "checklists", {
+    id: "cl-izaje-carga",
+    nombre: "Evaluación de carga — Maniobras de izaje (grúa móvil / camión pluma)",
+    categoria: "ambos",
+    items: [
+      "Se determinó y documentó el peso real de la carga a izar, incluyendo el peso de eslingas, grilletes, ganchos y otros accesorios de izaje",
+      "Se revisó la tabla de capacidades de carga (tabla de carga) del fabricante antes de iniciar la maniobra",
+      { text: "Peso real de la carga evaluado (solo el número, en kg)", tipo: "texto" },
+      { text: "Capacidad máxima admisible según tabla de carga, para el radio y pluma usados (solo el número, en kg)", tipo: "texto" },
+      "Los accesorios de izaje (cadenas, eslingas, grilletes, ganchos) tienen su capacidad de carga límite claramente identificada",
+      "Los accesorios de izaje fueron inspeccionados visualmente antes del uso (sin fisuras, deformaciones, desgaste o corrosión) y se descartaron los que estén en mal estado",
+      "Existe un registro de inspección periódica de los accesorios de izaje expuestos a desgaste",
+      "Los ganchos utilizados cuentan con seguro de bloqueo (pestillo de seguridad)",
+      "Se consideró el ángulo de las eslingas/cadenas respecto a la carga (a menor ángulo, mayor es la tensión real en cada ramal)",
+      "La carga está correctamente eslingada/estrobada, con el peso distribuido en todos los ramales por igual",
+      "El terreno donde se posiciona el equipo es apto y los estabilizadores están correctamente extendidos y apoyados",
+      "Se delimitó y señalizó el área de influencia de la maniobra (radio de giro de la pluma), restringiendo el acceso a personal no autorizado",
+      "El operador cuenta con licencia y capacitación certificada vigente para maniobras de izaje",
+      "Se cuenta con rigger o señalero capacitado y certificado, con código de señales acordado con el operador",
+      "Las condiciones ambientales (viento, visibilidad) son adecuadas para realizar la maniobra",
+      "Existe un plan de izaje o procedimiento de trabajo específico para esta maniobra",
+      { text: "Observaciones adicionales del evaluador", tipo: "texto" },
+    ],
+  });
+
   const ITEMS_DEFECTO = [
     "Estadística Mensual", "Reporte de Gestión",
     "Reunión del Comité Paritario de Higiene y Seguridad",
