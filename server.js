@@ -1319,7 +1319,22 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "DELETE" && parts.length === 3) {
-      await dbDeleteOne(companyId, store, decodeURIComponent(parts[2]));
+      const idBorrar = decodeURIComponent(parts[2]);
+      if (store === "accesoUsuarios") {
+        // Un administrador normal de la empresa no puede eliminar al usuario
+        // del superAdmin de la plataforma (identificado por su correo en
+        // platform_admins), aunque tenga el perfil de Administrador -- solo
+        // el propio superAdmin puede hacerlo.
+        const objetivo = await dbGetOne(companyId, store, idBorrar);
+        if (objetivo && objetivo.email && (await esSuperAdmin(objetivo.email))) {
+          const callerEmail = await getCallerEmail(companyId, payload);
+          if (!(await esSuperAdmin(callerEmail))) {
+            sendJson(res, 403, { error: "No puedes eliminar al administrador de la plataforma." });
+            return;
+          }
+        }
+      }
+      await dbDeleteOne(companyId, store, idBorrar);
       res.writeHead(204); res.end();
       return;
     }
