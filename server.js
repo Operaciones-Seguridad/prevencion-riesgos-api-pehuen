@@ -1102,7 +1102,11 @@ const server = http.createServer(async (req, res) => {
       const body = (await readBody(req)) || {};
       if (!body.nombre || !String(body.nombre).trim()) { sendJson(res, 400, { error: "Debes indicar el nombre de la nueva empresa." }); return; }
       const nueva = await dbCreateEmpresa(String(body.nombre).trim());
-      const { nombreAdmin, claveAdmin } = await sembrarEmpresaNueva(nueva.id, { rut: body.rut, rubro: body.rubro });
+      // El superAdmin que crea la empresa queda como su administrador inicial
+      // (mismo correo con el que ya inició sesión) -- así la empresa nueva
+      // aparece sola en su listado de empresas la próxima vez que entre con
+      // su correo, sin depender de la clave inicial genérica.
+      const { nombreAdmin, claveAdmin } = await sembrarEmpresaNueva(nueva.id, { rut: body.rut, rubro: body.rubro, adminEmail: email });
       sendJson(res, 200, { empresa: nueva, usuarioInicial: nombreAdmin, claveInicial: claveAdmin });
       return;
     }
