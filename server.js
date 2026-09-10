@@ -1112,30 +1112,17 @@ const server = http.createServer(async (req, res) => {
     }
 
     // Eliminar una empresa por completo. Es IRREVERSIBLE -- borra en
-    // cascada absolutamente todos los datos de esa empresa. Regla nueva
-    // (reemplaza la anterior, que era exactamente al revés):
-    //   - superAdmin: puede eliminar CUALQUIER empresa (dar de baja un
-    //     cliente, por ejemplo).
-    //   - administrador normal (esAdmin, no superAdmin): SOLO puede
-    //     eliminar su propia empresa (la del token con el que inició
-    //     sesión) -- cerrar su propia cuenta si así lo decide. Cualquier
-    //     otro id, 403.
+    // cascada absolutamente todos los datos de esa empresa. Exclusivo de
+    // superAdmin: un administrador normal de empresa ya no puede eliminar
+    // ni siquiera su propia empresa (antes podía, vía "Eliminar mi
+    // empresa" en Configuración -- se retiró para que dar de baja una
+    // empresa sea siempre una decisión del dueño de la plataforma).
     if (req.method === "DELETE" && parts[1] === "empresas" && parts[2]) {
       const targetId = parts[2];
       const email = await getCallerEmail(companyId, payload);
-      const esSuper = await esSuperAdmin(email);
-      if (!esSuper) {
-        const perfiles = await dbGetAll(companyId, "accesoPerfiles");
-        const usuarioActual = await dbGetOne(companyId, "accesoUsuarios", payload.sub);
-        const perfilActual = usuarioActual && perfiles.find((p) => p.id === usuarioActual.perfilId);
-        if (!perfilActual || perfilActual.esAdmin !== true) {
-          sendJson(res, 403, { error: "Solo un administrador puede eliminar una empresa." });
-          return;
-        }
-        if (targetId !== companyId) {
-          sendJson(res, 403, { error: "Solo puedes eliminar tu propia empresa." });
-          return;
-        }
+      if (!(await esSuperAdmin(email))) {
+        sendJson(res, 403, { error: "Solo el administrador de la plataforma puede eliminar una empresa." });
+        return;
       }
       const objetivo = await dbGetEmpresa(targetId);
       if (!objetivo) { sendJson(res, 404, { error: "Esa empresa no existe (puede que ya se haya eliminado)." }); return; }
