@@ -58,6 +58,5 @@ credencial pública documentada aquí.
   plano, y nunca se devuelven al navegador.
 - **Limitación conocida:** cualquier usuario autenticado (con sesión
   válida) puede leer/escribir cualquier módulo vía la API; el control
-  de qué pestañas ve cada perfil sigue siendo solo de interfaz, igual
-  que en el prototipo original. Para restringir por rol también a
+  de qué pestañas ve cada perfil sigue siendo solo de interfaz. Para restringir por rol también a
   nivel de servidor, se requeriría una fase adicional de desarrollo.
