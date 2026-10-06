@@ -51,7 +51,7 @@ const STORES = [
   "tmertRegistros", "arbolesCausales", "riohys", "documentos",
   "cphysMiembros", "cphysReuniones", "correosResponsables", "cphysPrograma",
   "cphysCapacitaciones", "grdAmenazas", "grdComite", "grdPlanRespuesta",
-  "grdSimulacros", "grdPlanAccion", "grdPlanEmergencia", "grdExtintores", "iapRegistros", "accesoPerfiles",
+  "grdSimulacros", "grdPlanAccion", "grdPlanEmergencia", "grdExtintores", "registroExtintores", "iapRegistros", "accesoPerfiles",
   "accesoUsuarios", "levantamientos", "compromisosItems", "compromisosRegistros",
   "planAccionMatriz", "eppStock", "accInvestigaciones", "ds44Obligaciones", "ds44Cumplimiento",
   "cursosObligatorios", "trabajadorCursos", "ds67Evaluaciones", "cphysAcuerdos",
