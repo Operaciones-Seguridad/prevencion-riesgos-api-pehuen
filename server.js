@@ -323,12 +323,19 @@ function limpiarMarkdownIA(texto) {
 const TIPO_DOC_LABEL_IA = { politica: "una Política de Seguridad y Salud en el Trabajo (SST)", procedimiento: "un Procedimiento o Instructivo de trabajo seguro", manual: "un Manual del sistema de gestión de prevención de riesgos" };
 
 // Mismo cálculo de nivel de riesgo que usa el frontend (index.html: nivelRiesgo).
+// Matriz de doble entrada de la MIPER (fila = probabilidad, columna = consecuencia):
+// toda consecuencia 5 (Catastrófico) es "Muy alto" sin importar la probabilidad, y
+// Raro (1) x Moderado (3) es una condición especial que da Medio.
+const MATRIZ_NIVEL_TABLA_IA = {
+  5: { 1: "Medio", 2: "Medio", 3: "Alto", 4: "Muy alto", 5: "Muy alto" },
+  4: { 1: "Medio", 2: "Medio", 3: "Alto", 4: "Alto", 5: "Muy alto" },
+  3: { 1: "Bajo", 2: "Medio", 3: "Medio", 4: "Alto", 5: "Muy alto" },
+  2: { 1: "Bajo", 2: "Medio", 3: "Medio", 4: "Medio", 5: "Muy alto" },
+  1: { 1: "Bajo", 2: "Bajo", 3: "Medio", 4: "Medio", 5: "Muy alto" },
+};
 function nivelRiesgoIA(p, c) {
-  const v = (p || 0) * (c || 0);
-  if (v <= 4) return "Bajo";
-  if (v <= 9) return "Medio";
-  if (v <= 16) return "Alto";
-  return "Crítico";
+  const fila = MATRIZ_NIVEL_TABLA_IA[Math.round(p || 0)];
+  return (fila && fila[Math.round(c || 0)]) || "Bajo";
 }
 // Mismo parseo que usa el frontend (index.html: parseControlesBullets/jerarquiaDe)
 // para leer las medidas de control jerarquizadas (A-E, DS 44) de una línea de
@@ -809,7 +816,7 @@ async function redactarHallazgoConIA(companyId, { notaBreve, nivel, areaNombre, 
   const [empresa] = await Promise.all([dbGetAll(companyId, "empresa")]);
   const razonSocial = (empresa[0] && empresa[0].razonSocial) || "la empresa";
   const rubro = (empresa[0] && empresa[0].rubro) || "no especificado";
-  const NIVEL_LABEL_IA = { bajo: "Bajo", medio: "Medio", alto: "Alto", critico: "Crítico" };
+  const NIVEL_LABEL_IA = { bajo: "Bajo", medio: "Medio", alto: "Alto", critico: "Muy alto" };
   const tipoRegistroTexto = tipoRegistro === "observacion" ? "una Observación" : "una Inspección";
 
   const prompt = `Eres un prevencionista de riesgos experto en normativa chilena (DS N°44/2024, DS N°594, Ley N°16.744). Redacta en español de Chile la descripción formal de un hallazgo detectado durante ${tipoRegistroTexto} de seguridad en ${razonSocial} (rubro: ${rubro})${formatoNombre ? `, formato "${formatoNombre}"` : ""}${areaNombre ? `, área "${areaNombre}"` : ""}.
