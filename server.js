@@ -675,6 +675,115 @@ probabilidad y consecuencia son enteros de 1 a 5. jerarquia es una sola letra A,
   return sugerencias;
 }
 
+// ---------- revisión de las medidas de control de una línea de la matriz con IA ----------
+// Evalúa las medidas actuales de UNA línea frente al peligro/riesgo y a la
+// jerarquía de controles del DS 44, y propone medidas faltantes. Nunca modifica
+// la matriz: el frontend muestra el resultado y el usuario decide qué agregar.
+const VEREDICTOS_CONTROL_VALIDOS = new Set(["adecuada", "mejorable", "insuficiente"]);
+const JERARQUIA_NOMBRE_IA = { A: "Eliminación", B: "Sustitución", C: "Control de ingeniería", D: "Control administrativo", E: "Elementos de protección personal (EPP)" };
+async function revisarControlesConIA(companyId, { matrizId }) {
+  if (!ANTHROPIC_API_KEY) {
+    const err = new Error("La revisión con IA no está configurada en este servidor: falta la variable de entorno ANTHROPIC_API_KEY.");
+    err.statusCode = 500;
+    throw err;
+  }
+  const [empresa, areas, matriz] = await Promise.all([
+    dbGetAll(companyId, "empresa"),
+    dbGetAll(companyId, "areas"),
+    dbGetAll(companyId, "matriz"),
+  ]);
+  const m = matriz.find((x) => x.id === matrizId);
+  if (!m) {
+    const err = new Error("No se encontró la línea de la matriz a revisar.");
+    err.statusCode = 404;
+    throw err;
+  }
+  const razonSocial = (empresa[0] && empresa[0].razonSocial) || "la empresa";
+  const rubro = (empresa[0] && empresa[0].rubro) || "no especificado";
+  const area = (areas.find((a) => a.id === m.areaId) || {}).nombre || "sin área";
+  const medidas = jerarquiaDeIA(m);
+  const listaMedidas = medidas.length
+    ? medidas.map((c, i) => `${i}. [${c.jerarquia ? `${c.jerarquia} - ${JERARQUIA_NOMBRE_IA[c.jerarquia] || c.jerarquia}` : "sin clasificar"}] ${c.texto || "(sin texto)"}${c.responsable ? ` (responsable: ${c.responsable})` : ""}`).join("\n")
+    : "(esta línea todavía no tiene medidas de control)";
+  const nivelPuro = nivelRiesgoIA(m.probabilidad, m.consecuencia);
+  const tieneResidual = Number(m.probabilidadResidual) > 0 && Number(m.consecuenciaResidual) > 0;
+  const nivelResidual = tieneResidual ? nivelRiesgoIA(m.probabilidadResidual, m.consecuenciaResidual) : "";
+
+  const prompt = `Eres un prevencionista de riesgos experto en normativa chilena (Ley N°16.744, DS N°44/2024, DS N°594). Revisas las medidas de control de una línea de la Matriz de Identificación de Peligros y Evaluación de Riesgos (IPER) de una empresa.
+
+Empresa: ${razonSocial} (rubro: ${rubro})
+Área: ${area}
+Proceso / actividad: ${[m.proceso, m.actividad].filter(Boolean).join(" / ") || "no indicado"}
+Categoría: ${m.categoria || "no indicada"}
+Peligro: ${m.peligro || "no indicado"}
+Riesgo: ${m.riesgo || "no indicado"}${m.efecto ? `\nEfecto: ${m.efecto}` : ""}
+Nivel de riesgo puro: ${nivelPuro} (probabilidad ${m.probabilidad || "?"} x consecuencia ${m.consecuencia || "?"})${tieneResidual ? `\nNivel de riesgo residual evaluado: ${nivelResidual}` : ""}
+
+Medidas de control actuales, numeradas desde 0 (la letra es la jerarquía del DS 44: A Eliminación, B Sustitución, C Control de ingeniería, D Control administrativo, E EPP):
+${listaMedidas}
+
+Tu tarea:
+1. Evalúa CADA medida actual: veredicto "adecuada" (controla bien el peligro), "mejorable" (sirve pero es vaga, incompleta o genérica) o "insuficiente" (no controla realmente el peligro o está mal clasificada). Si la letra de jerarquía asignada no corresponde al tipo de medida, indica la letra correcta en "jerarquiaSugerida"; si está bien o no estaba clasificada y no tienes certeza, usa "".
+2. Indica qué medidas faltan, privilegiando las de mayor jerarquía (A, B, C) cuando sean realistas para este rubro y actividad, y no dejes el EPP como única barrera. Propón como máximo 4 medidas faltantes, concretas y específicas (no frases genéricas como "tener cuidado" o "capacitar al personal").
+3. Haz un resumen de 2 a 3 frases con tu diagnóstico general de las medidas de esta línea.
+
+No inventes datos que no estén arriba. Si no hay medidas actuales, "evaluacion" va vacío y solo propones faltantes.
+
+Responde ÚNICAMENTE con un objeto JSON válido (sin texto antes ni después, sin bloques de código markdown), con esta forma exacta:
+{"resumen": "...", "evaluacion": [{"indice": 0, "veredicto": "adecuada|mejorable|insuficiente", "jerarquiaSugerida": "A|B|C|D|E o vacío", "comentario": "..."}], "faltantes": [{"jerarquia": "A", "texto": "...", "motivo": "..."}]}`;
+
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": ANTHROPIC_API_KEY,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: ANTHROPIC_MODEL,
+      max_tokens: 2500,
+      messages: [{ role: "user", content: prompt }],
+    }),
+  });
+  if (!res.ok) {
+    let detail = "";
+    try { detail = (await res.json()).error?.message || ""; } catch (e) {}
+    const err = new Error(detail || `El servicio de IA respondió con un error (${res.status}).`);
+    err.statusCode = 502;
+    throw err;
+  }
+  const data = await res.json();
+  const texto = (data.content || []).map((b) => b.text || "").join("\n").trim();
+
+  let crudo;
+  try {
+    const inicio = texto.indexOf("{");
+    const fin = texto.lastIndexOf("}");
+    if (inicio === -1 || fin === -1 || fin < inicio) throw new Error("sin objeto JSON");
+    crudo = JSON.parse(texto.slice(inicio, fin + 1));
+  } catch (e) {
+    const err = new Error(data.stop_reason === "max_tokens"
+      ? "La respuesta de la IA fue demasiado larga y se cortó. Intenta de nuevo."
+      : "La IA no devolvió un formato válido, intenta de nuevo.");
+    err.statusCode = 502;
+    throw err;
+  }
+  const corto = (v, max) => String(v || "").trim().slice(0, max);
+  const evaluacion = (Array.isArray(crudo.evaluacion) ? crudo.evaluacion : [])
+    .filter((e) => e && Number.isInteger(e.indice) && e.indice >= 0 && e.indice < medidas.length)
+    .map((e) => ({
+      indice: e.indice,
+      veredicto: VEREDICTOS_CONTROL_VALIDOS.has(String(e.veredicto || "").toLowerCase()) ? String(e.veredicto).toLowerCase() : "mejorable",
+      jerarquiaSugerida: JERARQUIAS_VALIDAS.has(String(e.jerarquiaSugerida || "").toUpperCase()) ? String(e.jerarquiaSugerida).toUpperCase() : "",
+      comentario: corto(e.comentario, 500),
+    }));
+  const faltantes = (Array.isArray(crudo.faltantes) ? crudo.faltantes : [])
+    .filter((f) => f && JERARQUIAS_VALIDAS.has(String(f.jerarquia || "").toUpperCase()) && String(f.texto || "").trim())
+    .slice(0, 4)
+    .map((f) => ({ jerarquia: String(f.jerarquia).toUpperCase(), texto: corto(f.texto, 400), motivo: corto(f.motivo, 400) }));
+  return { resumen: corto(crudo.resumen, 1000), evaluacion, faltantes };
+}
+
 const TIPOS_ITEM_FORMATO_VALIDOS = new Set(["check", "texto"]);
 
 // ---------- sugerencia de ítems para un formato de inspección/observación con IA ----------
@@ -1220,6 +1329,18 @@ const server = http.createServer(async (req, res) => {
       try {
         const sugerencias = await sugerirMatrizConIA(companyId, body);
         sendJson(res, 200, { sugerencias });
+      } catch (err) {
+        sendJson(res, err.statusCode || 500, { error: err.message });
+      }
+      return;
+    }
+
+    if (req.method === "POST" && parts[1] === "ia" && parts[2] === "revisar-controles") {
+      const body = (await readBody(req)) || {};
+      if (!body.matrizId) { sendJson(res, 400, { error: "Debes indicar la línea de la matriz a revisar." }); return; }
+      try {
+        const revision = await revisarControlesConIA(companyId, body);
+        sendJson(res, 200, revision);
       } catch (err) {
         sendJson(res, err.statusCode || 500, { error: err.message });
       }
