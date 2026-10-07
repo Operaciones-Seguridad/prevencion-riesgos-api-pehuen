@@ -676,6 +676,142 @@ probabilidad y consecuencia son enteros de 1 a 5. jerarquia es una sola letra A,
   return sugerencias;
 }
 
+// ---------- evaluación de riesgos de una actividad a partir de FOTOS con IA ----------
+// Recibe hasta 6 fotos (ya reducidas por el navegador, en base64) de una actividad
+// o puesto de trabajo y le pide a Claude, que además ve las imágenes, líneas
+// candidatas para la Matriz de riesgos con la misma forma que sugerirMatrizConIA
+// más "evidencia" (qué se ve en la foto que lo justifica). Las fotos NO se
+// guardan en ningún lado: viajan solo en esta solicitud. Igual que las demás
+// sugerencias, el frontend las muestra para revisión y NUNCA se agregan solas.
+const FOTOS_IA_MAX = 6;
+const FOTOS_IA_TIPOS = new Set(["image/jpeg", "image/png", "image/webp"]);
+async function evaluarFotosConIA(companyId, { imagenes, areaId, actividad, contextoAdicional, cantidad }) {
+  if (!ANTHROPIC_API_KEY) {
+    const err = new Error("La evaluación con IA no está configurada en este servidor: falta la variable de entorno ANTHROPIC_API_KEY.");
+    err.statusCode = 500;
+    throw err;
+  }
+  const fotos = Array.isArray(imagenes) ? imagenes : [];
+  if (!fotos.length) { const err = new Error("Debes adjuntar al menos una foto."); err.statusCode = 400; throw err; }
+  if (fotos.length > FOTOS_IA_MAX) { const err = new Error(`Puedes enviar como máximo ${FOTOS_IA_MAX} fotos por análisis.`); err.statusCode = 400; throw err; }
+  for (const f of fotos) {
+    if (!f || !FOTOS_IA_TIPOS.has(String(f.tipo)) || typeof f.data !== "string" || !/^[A-Za-z0-9+/=]+$/.test(f.data) || f.data.length < 100) {
+      const err = new Error("Alguna de las fotos no tiene un formato válido (se aceptan JPG, PNG o WEBP).");
+      err.statusCode = 400;
+      throw err;
+    }
+    if (f.data.length > 7 * 1024 * 1024) { const err = new Error("Una de las fotos pesa demasiado; súbela más liviana."); err.statusCode = 400; throw err; }
+  }
+  const cantidadPedida = clampEntero(cantidad, 1, 12, 6);
+  const [empresa, areas, matriz] = await Promise.all([
+    dbGetAll(companyId, "empresa"),
+    dbGetAll(companyId, "areas"),
+    dbGetAll(companyId, "matriz"),
+  ]);
+  const razonSocial = (empresa[0] && empresa[0].razonSocial) || "la empresa";
+  const rubro = (empresa[0] && empresa[0].rubro) || "no especificado";
+  const areaElegida = areas.find((a) => a.id === areaId) || null;
+  const listaAreas = areas.length
+    ? areas.map((a) => `- id "${a.id}": ${a.nombre}`).join("\n")
+    : "  (esta empresa todavía no tiene áreas registradas; usa areaId null)";
+  const TOPE_EXISTENTES = 60;
+  const existentes = matriz.filter((m) => !areaElegida || m.areaId === areaElegida.id);
+  const lineasExistentes = existentes
+    .slice(0, TOPE_EXISTENTES)
+    .map((m) => `- ${[m.proceso, m.actividad].filter(Boolean).join(" / ") || "sin proceso/actividad"}: ${m.peligro || "—"} → ${m.riesgo || "—"}`)
+    .join("\n");
+
+  const prompt = `Eres un prevencionista de riesgos experto en normativa chilena (Ley N°16.744, DS N°44/2024, DS N°594), especialista en construir Matrices de Identificación de Peligros y Evaluación de Riesgos (IPER).
+
+Te adjunto ${fotos.length} foto(s) de una actividad o puesto de trabajo. Analízalas y propón líneas para la Matriz de riesgos.
+
+Empresa:
+- Razón social: ${razonSocial}
+- Rubro: ${rubro}
+- Áreas registradas (usa EXACTAMENTE uno de estos "id" en areaId, o null si ninguna aplica):
+${listaAreas}
+${areaElegida ? `- El usuario indicó que la actividad corresponde al área "${areaElegida.nombre}" (id "${areaElegida.id}").\n` : ""}${actividad ? `- Descripción de la actividad indicada por el usuario: ${actividad}\n` : ""}${contextoAdicional ? `- Contexto adicional: ${contextoAdicional}\n` : ""}
+Líneas que YA existen en la Matriz${areaElegida ? " para esa área" : ""} (no las repitas; complementa):
+${lineasExistentes || "  (todavía no hay ninguna)"}
+
+Reglas importantes:
+- Basa tus propuestas en lo que REALMENTE se ve en las fotos. Si algo es un supuesto porque no se alcanza a ver, dilo expresamente en "evidencia" (por ejemplo "supuesto, no visible en las fotos").
+- NO identifiques ni describas personas (ni rostros ni rasgos); refiérete solo a las condiciones, equipos, tareas y entorno.
+- Propón hasta ${cantidadPedida} línea(s). Para cada una, sigue la jerarquía de controles del DS 44 (A Eliminación, B Sustitución, C Control de ingeniería, D Control administrativo, E EPP): 2 a 4 medidas abarcando distintos niveles y NUNCA dejes el EPP como única medida.
+- "evidencia" indica en qué foto (por número, desde 1) y qué elemento visible justifica la línea.
+- "observaciones" resume en 2 a 4 frases lo que se observa en general (actividad, equipos, orden, condiciones) y qué no pudo evaluarse con estas fotos.
+
+Responde ÚNICAMENTE con un objeto JSON válido (sin texto antes ni después, sin bloques de código markdown), con esta forma exacta:
+{"observaciones": "...", "lineas": [{"areaId": "id de área o null", "proceso": "...", "actividad": "...", "categoria": "Físico|Químico|Biológico|Ergonómico|Psicosocial|otro texto breve", "peligro": "...", "riesgo": "...", "probabilidad": 1, "consecuencia": 1, "controlesJerarquizados": [{"jerarquia": "A", "texto": "..."}], "evidencia": "..."}]}
+
+probabilidad y consecuencia son enteros de 1 a 5. jerarquia es una sola letra A, B, C, D o E.`;
+
+  const contenido = fotos.map((f) => ({ type: "image", source: { type: "base64", media_type: String(f.tipo), data: f.data } }));
+  contenido.push({ type: "text", text: prompt });
+
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": ANTHROPIC_API_KEY,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: ANTHROPIC_MODEL,
+      max_tokens: Math.min(8000, 1200 + cantidadPedida * 450),
+      messages: [{ role: "user", content: contenido }],
+    }),
+  });
+  if (!res.ok) {
+    let detail = "";
+    try { detail = (await res.json()).error?.message || ""; } catch (e) {}
+    const err = new Error(detail || `El servicio de IA respondió con un error (${res.status}).`);
+    err.statusCode = 502;
+    throw err;
+  }
+  const data = await res.json();
+  const texto = (data.content || []).map((b) => b.text || "").join("\n").trim();
+
+  let crudo;
+  try {
+    const inicio = texto.indexOf("{");
+    const fin = texto.lastIndexOf("}");
+    if (inicio === -1 || fin === -1 || fin < inicio) throw new Error("sin objeto JSON");
+    crudo = JSON.parse(texto.slice(inicio, fin + 1));
+  } catch (e) {
+    const cortada = data.stop_reason === "max_tokens";
+    const err = new Error(cortada
+      ? "La respuesta de la IA fue demasiado larga y se cortó a la mitad. Pide menos líneas e intenta de nuevo."
+      : "La IA no devolvió un formato válido, intenta de nuevo.");
+    err.statusCode = 502;
+    throw err;
+  }
+  if (!crudo || !Array.isArray(crudo.lineas)) {
+    const err = new Error("La IA no devolvió un formato válido, intenta de nuevo.");
+    err.statusCode = 502;
+    throw err;
+  }
+
+  const areaIds = new Set(areas.map((a) => a.id));
+  const sugerencias = crudo.lineas.slice(0, cantidadPedida).map((m) => ({
+    areaId: areaElegida ? areaElegida.id : (m && areaIds.has(m.areaId) ? m.areaId : null),
+    proceso: (m && String(m.proceso || "").trim()) || "",
+    actividad: (m && String(m.actividad || "").trim()) || "",
+    categoria: (m && String(m.categoria || "").trim()) || "",
+    peligro: (m && String(m.peligro || "").trim()) || "",
+    riesgo: (m && String(m.riesgo || "").trim()) || "",
+    probabilidad: clampEntero(m && m.probabilidad, 1, 5, 3),
+    consecuencia: clampEntero(m && m.consecuencia, 1, 5, 3),
+    evidencia: (m && String(m.evidencia || "").trim()) || "",
+    origen: "fotos",
+    controlesJerarquizados: (m && Array.isArray(m.controlesJerarquizados) ? m.controlesJerarquizados : [])
+      .filter((c) => c && JERARQUIAS_VALIDAS.has(String(c.jerarquia || "").toUpperCase()))
+      .map((c) => ({ jerarquia: String(c.jerarquia).toUpperCase(), texto: String(c.texto || "").trim(), responsable: "", plazo: "" })),
+  })).filter((m) => m.peligro || m.riesgo);
+
+  return { observaciones: String(crudo.observaciones || "").trim(), sugerencias };
+}
+
 // ---------- revisión de las medidas de control de una línea de la matriz con IA ----------
 // Evalúa las medidas actuales de UNA línea frente al peligro/riesgo y a la
 // jerarquía de controles del DS 44, y propone medidas faltantes. Nunca modifica
@@ -1330,6 +1466,17 @@ const server = http.createServer(async (req, res) => {
       try {
         const sugerencias = await sugerirMatrizConIA(companyId, body);
         sendJson(res, 200, { sugerencias });
+      } catch (err) {
+        sendJson(res, err.statusCode || 500, { error: err.message });
+      }
+      return;
+    }
+
+    if (req.method === "POST" && parts[1] === "ia" && parts[2] === "evaluar-fotos") {
+      const body = (await readBody(req)) || {};
+      try {
+        const resultado = await evaluarFotosConIA(companyId, body);
+        sendJson(res, 200, resultado);
       } catch (err) {
         sendJson(res, err.statusCode || 500, { error: err.message });
       }
