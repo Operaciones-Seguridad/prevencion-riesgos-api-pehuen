@@ -58,6 +58,7 @@ const STORES = [
   "irlCargos", "irlEntregas", "riohysEntregas", "diagnosticos", "izajeCarga",
   "transitoInvestigaciones", "programaPlantillas", "programaCargo", "programaPersonas", "programaConductual",
   "vsExpuestos", "vsCda", "vsEvaluaciones", "vsMovimientos", "matrizVersiones", "vsExamenesOcup",
+  "objetivosGestion", "indicadoresGestion",
 ];
 const STORES_SET = new Set(STORES);
 
@@ -1160,7 +1161,7 @@ async function sembrarEmpresaNueva(companyId, { rut, rubro, adminNombre, adminEm
   const perfilPrevId = crypto.randomUUID();
   const perfilSupervisorId = crypto.randomUUID();
   const perfilTrabajadorId = crypto.randomUUID();
-  const TODAS_LAS_VISTAS = ["dashboard", "realizar-inspecciones", "inspecciones", "matriz", "vigilancia", "programa", "capacitacion", "accidentabilidad", "seguridad", "epp", "cumplimiento", "riohys", "documentos", "cphys", "emergencia", "compromisos", "config"];
+  const TODAS_LAS_VISTAS = ["dashboard", "diagnostico", "objetivos", "realizar-inspecciones", "inspecciones", "matriz", "vigilancia", "programa", "capacitacion", "accidentabilidad", "seguridad", "epp", "cumplimiento", "riohys", "documentos", "cphys", "emergencia", "compromisos", "config"];
   await dbUpsert(companyId, "accesoPerfiles", { id: perfilAdminId, nombre: "Administrador", esAdmin: true, vistas: TODAS_LAS_VISTAS.slice() });
   await dbUpsert(companyId, "accesoPerfiles", { id: perfilPrevId, nombre: "Prevencionista de Riesgos", esAdmin: false, vistas: TODAS_LAS_VISTAS.filter((v) => v !== "config") });
   await dbUpsert(companyId, "accesoPerfiles", { id: perfilSupervisorId, nombre: "Jefe de Obra / Supervisor", esAdmin: false, vistas: ["dashboard", "realizar-inspecciones", "inspecciones", "matriz", "programa", "capacitacion", "accidentabilidad", "emergencia", "compromisos"] });
