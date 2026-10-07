@@ -57,7 +57,7 @@ const STORES = [
   "cursosObligatorios", "trabajadorCursos", "ds67Evaluaciones", "cphysAcuerdos",
   "irlCargos", "irlEntregas", "riohysEntregas", "diagnosticos", "izajeCarga",
   "transitoInvestigaciones", "programaPlantillas", "programaCargo", "programaPersonas", "programaConductual",
-  "vsExpuestos", "vsCda", "vsEvaluaciones", "vsMovimientos",
+  "vsExpuestos", "vsCda", "vsEvaluaciones", "vsMovimientos", "matrizVersiones",
 ];
 const STORES_SET = new Set(STORES);
 
