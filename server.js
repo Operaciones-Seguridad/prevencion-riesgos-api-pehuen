@@ -738,8 +738,9 @@ Reglas importantes:
 - Basa tus propuestas en lo que REALMENTE se ve en las fotos. Si algo es un supuesto porque no se alcanza a ver, dilo expresamente en "evidencia" (por ejemplo "supuesto, no visible en las fotos").
 - NO identifiques ni describas personas (ni rostros ni rasgos); refiérete solo a las condiciones, equipos, tareas y entorno.
 - Propón hasta ${cantidadPedida} línea(s). Para cada una, sigue la jerarquía de controles del DS 44 (A Eliminación, B Sustitución, C Control de ingeniería, D Control administrativo, E EPP): 2 a 4 medidas abarcando distintos niveles y NUNCA dejes el EPP como única medida.
-- "evidencia" indica en qué foto (por número, desde 1) y qué elemento visible justifica la línea.
-- "observaciones" resume en 2 a 4 frases lo que se observa en general (actividad, equipos, orden, condiciones) y qué no pudo evaluarse con estas fotos.
+- "evidencia" indica en qué foto (por número, desde 1) y qué elemento visible justifica la línea (máximo 25 palabras).
+- "observaciones" resume en 2 o 3 frases lo que se observa en general (actividad, equipos, orden, condiciones) y qué no pudo evaluarse con estas fotos (máximo 60 palabras).
+- Sé conciso: proceso, actividad, peligro y riesgo en frases cortas; cada medida de control en una sola frase de máximo 20 palabras; entre 2 y 3 medidas por línea. Escribe primero las líneas más importantes.
 
 Responde ÚNICAMENTE con un objeto JSON válido (sin texto antes ni después, sin bloques de código markdown), con esta forma exacta:
 {"observaciones": "...", "lineas": [{"areaId": "id de área o null", "proceso": "...", "actividad": "...", "categoria": "Físico|Químico|Biológico|Ergonómico|Psicosocial|otro texto breve", "peligro": "...", "riesgo": "...", "probabilidad": 1, "consecuencia": 1, "controlesJerarquizados": [{"jerarquia": "A", "texto": "..."}], "evidencia": "..."}]}
@@ -758,7 +759,10 @@ probabilidad y consecuencia son enteros de 1 a 5. jerarquia es una sola letra A,
     },
     body: JSON.stringify({
       model: ANTHROPIC_MODEL,
-      max_tokens: Math.min(8000, 1200 + cantidadPedida * 450),
+      // Con fotos la IA describe más (evidencia + observaciones): un tope bajo cortaba la
+      // respuesta incluso con 3 líneas. Se deja holgura y, si igual se corta, se rescatan
+      // las líneas completas (ver rescatarLineasIA).
+      max_tokens: Math.min(9000, 2500 + cantidadPedida * 800),
       messages: [{ role: "user", content: contenido }],
     }),
   });
@@ -771,20 +775,25 @@ probabilidad y consecuencia son enteros de 1 a 5. jerarquia es una sola letra A,
   }
   const data = await res.json();
   const texto = (data.content || []).map((b) => b.text || "").join("\n").trim();
+  const cortada = data.stop_reason === "max_tokens";
 
-  let crudo;
+  let crudo, parcial = false;
   try {
     const inicio = texto.indexOf("{");
     const fin = texto.lastIndexOf("}");
     if (inicio === -1 || fin === -1 || fin < inicio) throw new Error("sin objeto JSON");
     crudo = JSON.parse(texto.slice(inicio, fin + 1));
   } catch (e) {
-    const cortada = data.stop_reason === "max_tokens";
-    const err = new Error(cortada
-      ? "La respuesta de la IA fue demasiado larga y se cortó a la mitad. Pide menos líneas e intenta de nuevo."
-      : "La IA no devolvió un formato válido, intenta de nuevo.");
-    err.statusCode = 502;
-    throw err;
+    // Respuesta cortada a la mitad: se aprovechan las líneas que sí llegaron completas.
+    const rescatado = cortada ? rescatarLineasIA(texto) : null;
+    if (rescatado && rescatado.lineas.length) { crudo = rescatado; parcial = true; }
+    else {
+      const err = new Error(cortada
+        ? "La respuesta de la IA fue demasiado larga y se cortó a la mitad. Pide menos líneas e intenta de nuevo."
+        : "La IA no devolvió un formato válido, intenta de nuevo.");
+      err.statusCode = 502;
+      throw err;
+    }
   }
   if (!crudo || !Array.isArray(crudo.lineas)) {
     const err = new Error("La IA no devolvió un formato válido, intenta de nuevo.");
@@ -809,7 +818,37 @@ probabilidad y consecuencia son enteros de 1 a 5. jerarquia es una sola letra A,
       .map((c) => ({ jerarquia: String(c.jerarquia).toUpperCase(), texto: String(c.texto || "").trim(), responsable: "", plazo: "" })),
   })).filter((m) => m.peligro || m.riesgo);
 
-  return { observaciones: String(crudo.observaciones || "").trim(), sugerencias };
+  return { observaciones: String(crudo.observaciones || "").trim(), sugerencias, parcial };
+}
+// Rescata las líneas completas de un JSON {"observaciones":"…","lineas":[{…},{…},{…  cortado a la mitad.
+function rescatarLineasIA(texto) {
+  const lineas = [];
+  const iLineas = texto.indexOf('"lineas"');
+  const iArr = iLineas === -1 ? -1 : texto.indexOf("[", iLineas);
+  if (iArr === -1) return null;
+  let profundidad = 0, enCadena = false, escape = false, inicioObj = -1;
+  for (let i = iArr + 1; i < texto.length; i++) {
+    const c = texto[i];
+    if (enCadena) {
+      if (escape) escape = false;
+      else if (c === "\\") escape = true;
+      else if (c === '"') enCadena = false;
+      continue;
+    }
+    if (c === '"') enCadena = true;
+    else if (c === "{") { if (profundidad === 0) inicioObj = i; profundidad++; }
+    else if (c === "}") {
+      profundidad--;
+      if (profundidad === 0 && inicioObj !== -1) {
+        try { lineas.push(JSON.parse(texto.slice(inicioObj, i + 1))); } catch (e) { /* objeto dañado: se omite */ }
+        inicioObj = -1;
+      }
+    } else if (c === "]" && profundidad === 0) break;
+  }
+  const m = /"observaciones"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(texto);
+  let observaciones = "";
+  if (m) { try { observaciones = JSON.parse('"' + m[1] + '"'); } catch (e) { observaciones = m[1]; } }
+  return { observaciones, lineas };
 }
 
 // ---------- revisión de las medidas de control de una línea de la matriz con IA ----------
