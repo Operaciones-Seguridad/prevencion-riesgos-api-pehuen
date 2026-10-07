@@ -686,7 +686,11 @@ probabilidad y consecuencia son enteros de 1 a 5. jerarquia es una sola letra A,
 // sugerencias, el frontend las muestra para revisión y NUNCA se agregan solas.
 const FOTOS_IA_MAX = 6;
 const FOTOS_IA_TIPOS = new Set(["image/jpeg", "image/png", "image/webp"]);
-async function evaluarFotosConIA(companyId, { imagenes, areaId, actividad, contextoAdicional, cantidad }) {
+// modo "ast": análisis de una tarea puntual para la AST (Análisis de Seguridad del Trabajo). En vez de
+// complementar la Matriz, propone los riesgos propios de esa tarea y medidas prácticas de terreno, sin
+// repetir los que la AST ya tiene cargados (yaCargados). Misma forma de respuesta.
+async function evaluarFotosConIA(companyId, { imagenes, areaId, actividad, contextoAdicional, cantidad, modo, yaCargados }) {
+  const esAst = modo === "ast";
   if (!ANTHROPIC_API_KEY) {
     const err = new Error("La evaluación con IA no está configurada en este servidor: falta la variable de entorno ANTHROPIC_API_KEY.");
     err.statusCode = 500;
@@ -721,8 +725,36 @@ async function evaluarFotosConIA(companyId, { imagenes, areaId, actividad, conte
     .slice(0, TOPE_EXISTENTES)
     .map((m) => `- ${[m.proceso, m.actividad].filter(Boolean).join(" / ") || "sin proceso/actividad"}: ${m.peligro || "—"} → ${m.riesgo || "—"}`)
     .join("\n");
+  const astYaCargados = (Array.isArray(yaCargados) ? yaCargados : [])
+    .map((t) => String(t == null ? "" : t).replace(/\s+/g, " ").trim().slice(0, 200))
+    .filter(Boolean)
+    .slice(0, 40)
+    .map((t) => `- ${t}`)
+    .join("\n");
 
-  const prompt = `Eres un prevencionista de riesgos experto en normativa chilena (Ley N°16.744, DS N°44/2024, DS N°594), especialista en construir Matrices de Identificación de Peligros y Evaluación de Riesgos (IPER).
+  const prompt = esAst ? `Eres un prevencionista de riesgos experto en normativa chilena (Ley N°16.744, DS N°44/2024, DS N°594), especialista en elaborar el AST (Análisis de Seguridad del Trabajo) que se revisa con los trabajadores justo antes de iniciar una tarea.
+
+Te adjunto ${fotos.length} foto(s) del lugar o de la tarea que se va a realizar. Analízalas e identifica los peligros y riesgos propios de ESTA tarea puntual, con las medidas de control que el equipo debe aplicar en terreno.
+
+Empresa:
+- Razón social: ${razonSocial}
+- Rubro: ${rubro}
+${areaElegida ? `- Área de la tarea: "${areaElegida.nombre}".\n` : ""}${actividad ? `- Tarea / actividad indicada por el usuario: ${actividad}\n` : ""}${contextoAdicional ? `- Contexto adicional: ${contextoAdicional}\n` : ""}
+Riesgos que la AST YA tiene cargados (no los repitas; complementa con lo que falta):
+${astYaCargados || "  (todavía no hay ninguno)"}
+
+Reglas importantes:
+- Basa tus propuestas en lo que REALMENTE se ve en las fotos (condiciones del lugar, equipos, herramientas, materiales, energías, orden, entorno). Si algo es un supuesto porque no se alcanza a ver, dilo expresamente en "evidencia" (por ejemplo "supuesto, no visible en las fotos").
+- NO identifiques ni describas personas (ni rostros ni rasgos); refiérete solo a las condiciones, equipos, tareas y entorno.
+- Propón hasta ${cantidadPedida} riesgo(s), ordenados del más importante al menos importante. Para cada uno entrega 2 a 3 medidas de control prácticas y concretas, aplicables por el equipo antes y durante la tarea, siguiendo la jerarquía de controles del DS 44 (A Eliminación, B Sustitución, C Control de ingeniería, D Control administrativo, E EPP) y NUNCA dejes el EPP como única medida.
+- "evidencia" indica en qué foto (por número, desde 1) y qué elemento visible justifica el riesgo (máximo 25 palabras).
+- "observaciones" resume en 2 o 3 frases lo que se observa en general (lugar, equipos, orden, condiciones) y qué no pudo evaluarse con estas fotos (máximo 60 palabras).
+- Sé conciso: peligro y riesgo en frases cortas; cada medida de control en una sola frase de máximo 20 palabras.
+
+Responde ÚNICAMENTE con un objeto JSON válido (sin texto antes ni después, sin bloques de código markdown), con esta forma exacta:
+{"observaciones": "...", "lineas": [{"peligro": "...", "riesgo": "...", "probabilidad": 1, "consecuencia": 1, "controlesJerarquizados": [{"jerarquia": "A", "texto": "..."}], "evidencia": "..."}]}
+
+probabilidad y consecuencia son enteros de 1 a 5. jerarquia es una sola letra A, B, C, D o E.` : `Eres un prevencionista de riesgos experto en normativa chilena (Ley N°16.744, DS N°44/2024, DS N°594), especialista en construir Matrices de Identificación de Peligros y Evaluación de Riesgos (IPER).
 
 Te adjunto ${fotos.length} foto(s) de una actividad o puesto de trabajo. Analízalas y propón líneas para la Matriz de riesgos.
 
