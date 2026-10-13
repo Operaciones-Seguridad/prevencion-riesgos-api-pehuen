@@ -198,6 +198,36 @@ async function dbListEmpresas() {
   const { rows } = await pool.query("SELECT id, nombre, activo, aprobada FROM empresas WHERE activo = true ORDER BY nombre ASC");
   return rows;
 }
+// Uso de almacenamiento por empresa (solo lectura, para el superAdmin). El tamaño de cada empresa es la
+// suma de pg_column_size(data) de sus registros (lo que realmente ocupa lo guardado, ya comprimido por
+// Postgres); no incluye índices ni el espacio interno de las tablas, por eso se informa también el tamaño
+// total de la base de datos (pg_database_size) como referencia.
+async function dbUsoPorEmpresa() {
+  const [empresas, porStore, bd] = await Promise.all([
+    pool.query(`SELECT e.id, e.nombre, e.aprobada, COALESCE(SUM(pg_column_size(r.data)), 0)::bigint AS bytes, COUNT(r.id)::int AS registros
+                FROM empresas e LEFT JOIN records r ON r.company_id = e.id WHERE e.activo = true GROUP BY e.id, e.nombre, e.aprobada ORDER BY bytes DESC, e.nombre ASC`),
+    pool.query("SELECT company_id, store, SUM(pg_column_size(data))::bigint AS bytes, COUNT(*)::int AS registros FROM records GROUP BY company_id, store"),
+    pool.query("SELECT pg_database_size(current_database())::bigint AS bytes"),
+  ]);
+  const topPorEmpresa = new Map();
+  for (const r of porStore.rows) {
+    if (!topPorEmpresa.has(r.company_id)) topPorEmpresa.set(r.company_id, []);
+    topPorEmpresa.get(r.company_id).push({ store: r.store, bytes: Number(r.bytes), registros: Number(r.registros) });
+  }
+  const lista = empresas.rows.map((e) => ({
+    id: e.id,
+    nombre: e.nombre,
+    aprobada: e.aprobada,
+    bytes: Number(e.bytes),
+    registros: Number(e.registros),
+    top: (topPorEmpresa.get(e.id) || []).sort((a, b) => b.bytes - a.bytes).slice(0, 4),
+  }));
+  return {
+    empresas: lista,
+    totalDatosBytes: lista.reduce((s, e) => s + e.bytes, 0),
+    baseDatosBytes: Number(bd.rows[0] ? bd.rows[0].bytes : 0),
+  };
+}
 async function dbGetEmpresa(id) {
   const { rows } = await pool.query("SELECT id, nombre, activo, aprobada FROM empresas WHERE id = $1", [id]);
   return rows[0] || null;
@@ -1381,6 +1411,22 @@ const server = http.createServer(async (req, res) => {
         empresa: empresaActual ? { id: empresaActual.id, nombre: empresaActual.nombre } : null,
         superAdmin: await esSuperAdmin(email),
       });
+      return;
+    }
+
+    // Uso de almacenamiento por empresa (solo lectura): exclusivo de superAdmin. Va ANTES del listado de
+    // empresas de abajo, que atiende cualquier GET /api/empresas/... sin mirar parts[2].
+    if (req.method === "GET" && parts[1] === "empresas" && parts[2] === "uso") {
+      const email = await getCallerEmail(companyId, payload);
+      if (!(await esSuperAdmin(email))) {
+        sendJson(res, 403, { error: "Solo el administrador de la plataforma puede ver el uso de almacenamiento." });
+        return;
+      }
+      try {
+        sendJson(res, 200, await dbUsoPorEmpresa());
+      } catch (err) {
+        sendJson(res, 500, { error: "No se pudo calcular el uso de almacenamiento." });
+      }
       return;
     }
 
