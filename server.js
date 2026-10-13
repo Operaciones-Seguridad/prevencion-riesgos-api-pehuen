@@ -198,6 +198,50 @@ async function dbListEmpresas() {
   const { rows } = await pool.query("SELECT id, nombre, activo, aprobada FROM empresas WHERE activo = true ORDER BY nombre ASC");
   return rows;
 }
+// Registro de ingresos (tabla login_log): se anota al iniciar sesión y cuando la app se abre con una sesión ya iniciada
+// (GET /api/me), como máximo una vez cada 30 minutos por persona. Nunca debe impedir que alguien entre.
+let ultimaLimpiezaIngresos = 0;
+async function registrarIngreso(companyId, usuarioId, dedupMinutos) {
+  try {
+    if (dedupMinutos) {
+      const { rows } = await pool.query(
+        "SELECT 1 FROM login_log WHERE company_id = $1 AND usuario_id = $2 AND momento > now() - make_interval(mins => $3::int) LIMIT 1",
+        [companyId, usuarioId, dedupMinutos]
+      );
+      if (rows.length) return;
+    }
+    const u = await dbGetOne(companyId, "accesoUsuarios", usuarioId);
+    if (!u) return;
+    await pool.query("INSERT INTO login_log (company_id, usuario_id, nombre, email) VALUES ($1, $2, $3, $4)", [companyId, usuarioId, u.nombre || "", u.email || ""]);
+    if (Date.now() - ultimaLimpiezaIngresos > 24 * 3600 * 1000) {
+      ultimaLimpiezaIngresos = Date.now();
+      await pool.query("DELETE FROM login_log WHERE momento < now() - interval '13 months'");
+    }
+  } catch (err) { /* el registro de ingresos es auxiliar: se ignora cualquier error */ }
+}
+// Resumen de ingresos para el superAdmin: personas distintas que entraron (24 h / 7 días / 30 días), un renglón por usuario y los últimos ingresos.
+async function dbIngresos() {
+  const [resumen, usuarios, recientes] = await Promise.all([
+    pool.query(`SELECT
+        count(DISTINCT company_id || ':' || usuario_id) FILTER (WHERE momento > now() - interval '24 hours')::int AS h24,
+        count(DISTINCT company_id || ':' || usuario_id) FILTER (WHERE momento > now() - interval '7 days')::int AS d7,
+        count(DISTINCT company_id || ':' || usuario_id) FILTER (WHERE momento > now() - interval '30 days')::int AS d30,
+        count(*)::int AS total, min(momento) AS desde
+      FROM login_log`),
+    pool.query(`SELECT l.company_id, l.usuario_id, max(l.nombre) AS nombre, max(l.email) AS email, COALESCE(max(e.nombre), '(empresa eliminada)') AS empresa,
+        max(l.momento) AS ultimo, count(*) FILTER (WHERE l.momento > now() - interval '30 days')::int AS ult30, count(*)::int AS total
+      FROM login_log l LEFT JOIN empresas e ON e.id = l.company_id
+      GROUP BY l.company_id, l.usuario_id ORDER BY max(l.momento) DESC LIMIT 200`),
+    pool.query(`SELECT l.momento AS at, l.nombre, l.email, COALESCE(e.nombre, '(empresa eliminada)') AS empresa
+      FROM login_log l LEFT JOIN empresas e ON e.id = l.company_id ORDER BY l.momento DESC LIMIT 50`),
+  ]);
+  const r = resumen.rows[0] || {};
+  return {
+    resumen: { h24: r.h24 || 0, d7: r.d7 || 0, d30: r.d30 || 0, total: r.total || 0, desde: r.desde || null },
+    usuarios: usuarios.rows.map((u) => ({ empresaId: u.company_id, usuarioId: u.usuario_id, nombre: u.nombre || "", email: u.email || "", empresa: u.empresa, ultimo: u.ultimo, ult30: Number(u.ult30), total: Number(u.total) })),
+    recientes: recientes.rows.map((x) => ({ at: x.at, nombre: x.nombre || "", email: x.email || "", empresa: x.empresa })),
+  };
+}
 // Contacto de cada empresa para el superAdmin: nombre, cargo y correo de sus usuarios con perfil de
 // administrador (los primeros, que en una empresa registrada por sí sola es quien la creó). Solo lectura.
 async function dbContactosPorEmpresa() {
@@ -1359,6 +1403,7 @@ const server = http.createServer(async (req, res) => {
           }
         }
         const token = signToken({ sub: elegido.data.id, companyId: elegido.companyId });
+        await registrarIngreso(elegido.companyId, elegido.data.id, 0);
         sendJson(res, 200, { token, usuario: sanitizeUsuario(elegido.data), empresa: { id: elegido.empresa.id, nombre: elegido.empresa.nombre }, superAdmin: await esSuperAdmin(email) });
         return;
       }
@@ -1372,6 +1417,7 @@ const server = http.createServer(async (req, res) => {
       }
       if (empresa.aprobada === false) { sendJson(res, 403, { error: MSG_PENDIENTE, pendiente: true }); return; }
       const token = signToken({ sub: usuario.id, companyId });
+      await registrarIngreso(companyId, usuario.id, 0);
       sendJson(res, 200, { token, usuario: sanitizeUsuario(usuario), empresa: { id: empresa.id, nombre: empresa.nombre }, superAdmin: await esSuperAdmin(usuario.email) });
       return;
     }
@@ -1423,6 +1469,7 @@ const server = http.createServer(async (req, res) => {
     // revocarlo es inmediato, sin esperar 14 días a que expire un token ya
     // emitido.
     if (req.method === "GET" && parts[1] === "me") {
+      await registrarIngreso(companyId, payload.sub, 30);
       const empresaActual = await dbGetEmpresa(companyId);
       const email = await getCallerEmail(companyId, payload);
       sendJson(res, 200, {
@@ -1430,6 +1477,21 @@ const server = http.createServer(async (req, res) => {
         empresa: empresaActual ? { id: empresaActual.id, nombre: empresaActual.nombre } : null,
         superAdmin: await esSuperAdmin(email),
       });
+      return;
+    }
+
+    // Registro de ingresos (solo lectura): exclusivo de superAdmin. Antes del listado de empresas, por el mismo motivo.
+    if (req.method === "GET" && parts[1] === "empresas" && parts[2] === "ingresos") {
+      const email = await getCallerEmail(companyId, payload);
+      if (!(await esSuperAdmin(email))) {
+        sendJson(res, 403, { error: "Solo el administrador de la plataforma puede ver los ingresos." });
+        return;
+      }
+      try {
+        sendJson(res, 200, await dbIngresos());
+      } catch (err) {
+        sendJson(res, 500, { error: "No se pudo leer el registro de ingresos." });
+      }
       return;
     }
 
@@ -1758,6 +1820,22 @@ const server = http.createServer(async (req, res) => {
 
 async function main() {
   await pool.query(require("fs").readFileSync(require("path").join(__dirname, "schema.sql"), "utf8"));
+  // Tabla del registro de ingresos (solo la escribe/lee este servidor). Va aparte y protegida: si algo fallara aquí, la
+  // API igual arranca y solo se pierde el registro de ingresos. No guarda IP ni claves; se limpia a los 13 meses.
+  try {
+    await pool.query(`CREATE TABLE IF NOT EXISTS login_log (
+      id BIGSERIAL PRIMARY KEY,
+      company_id TEXT NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+      usuario_id TEXT NOT NULL,
+      nombre TEXT,
+      email TEXT,
+      momento TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`);
+    await pool.query("CREATE INDEX IF NOT EXISTS login_log_momento_idx ON login_log (momento DESC)");
+    await pool.query("CREATE INDEX IF NOT EXISTS login_log_usuario_idx ON login_log (company_id, usuario_id, momento DESC)");
+  } catch (err) {
+    console.error("No se pudo preparar la tabla login_log (el registro de ingresos queda desactivado):", err.message);
+  }
   await seedIfEmpty();
   server.listen(PORT, () => console.log(`API de Prevención de Riesgos (multi-empresa) escuchando en el puerto ${PORT}`));
 }
