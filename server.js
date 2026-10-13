@@ -198,6 +198,25 @@ async function dbListEmpresas() {
   const { rows } = await pool.query("SELECT id, nombre, activo, aprobada FROM empresas WHERE activo = true ORDER BY nombre ASC");
   return rows;
 }
+// Contacto de cada empresa para el superAdmin: nombre, cargo y correo de sus usuarios con perfil de
+// administrador (los primeros, que en una empresa registrada por sí sola es quien la creó). Solo lectura.
+async function dbContactosPorEmpresa() {
+  const { rows } = await pool.query(
+    `SELECT u.company_id, u.data->>'nombre' AS nombre, u.data->>'email' AS email, u.data->>'cargo' AS cargo,
+            COALESCE((p.data->>'esAdmin')::boolean, false) AS es_admin
+     FROM records u
+     LEFT JOIN records p ON p.company_id = u.company_id AND p.store = 'accesoPerfiles' AND p.id = u.data->>'perfilId'
+     WHERE u.store = 'accesoUsuarios' AND COALESCE(u.data->>'activo', 'true') <> 'false'`
+  );
+  const porEmpresa = new Map();
+  for (const r of rows) {
+    if (!r.es_admin) continue;
+    if (!porEmpresa.has(r.company_id)) porEmpresa.set(r.company_id, []);
+    const lista = porEmpresa.get(r.company_id);
+    if (lista.length < 3) lista.push({ nombre: r.nombre || "", cargo: r.cargo || "", email: r.email || "" });
+  }
+  return porEmpresa;
+}
 // Uso de almacenamiento por empresa (solo lectura, para el superAdmin). El tamaño de cada empresa es la
 // suma de pg_column_size(data) de sus registros (lo que realmente ocupa lo guardado, ya comprimido por
 // Postgres); no incluye índices ni el espacio interno de las tablas, por eso se informa también el tamaño
@@ -1439,7 +1458,10 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 403, { error: "Solo el administrador de la plataforma puede ver el listado completo de empresas." });
         return;
       }
-      sendJson(res, 200, await dbListEmpresas());
+      const lista = await dbListEmpresas();
+      let contactos = new Map();
+      try { contactos = await dbContactosPorEmpresa(); } catch (err) { /* el listado sigue funcionando sin la columna Contacto */ }
+      sendJson(res, 200, lista.map((e) => ({ ...e, contactos: contactos.get(e.id) || [] })));
       return;
     }
 
