@@ -1736,10 +1736,16 @@ const server = http.createServer(async (req, res) => {
       const body = (await readBody(req)) || {};
       const tipo = String(body.tipo || "").trim();
       const valor = String(body.valor || "").trim();
-      if (!tipo || !valor) { sendJson(res, 400, { error: "Debes indicar tipo y valor." }); return; }
+      // Importación masiva: "valores" es un arreglo de opciones (hasta 3.000, de 200 caracteres como máximo cada una).
+      const valores = Array.isArray(body.valores) ? Array.from(new Set(body.valores.map((v) => String(v == null ? "" : v).trim().slice(0, 200)).filter(Boolean))).slice(0, 3000) : null;
+      if (!tipo || (!valor && !(valores && valores.length))) { sendJson(res, 400, { error: "Debes indicar tipo y valor." }); return; }
       const empresaRows = await dbGetAll(companyId, "empresa");
       const rubroNorm = normRubro(empresaRows[0] && empresaRows[0].rubro);
-      await pool.query("INSERT INTO catalogos_rubro (rubro_norm, tipo, valor) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING", [rubroNorm, tipo, valor]);
+      if (valores && valores.length) {
+        await pool.query("INSERT INTO catalogos_rubro (rubro_norm, tipo, valor) SELECT $1::text, $2::text, v FROM unnest($3::text[]) AS v ON CONFLICT DO NOTHING", [rubroNorm, tipo, valores]);
+      } else {
+        await pool.query("INSERT INTO catalogos_rubro (rubro_norm, tipo, valor) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING", [rubroNorm, tipo, valor]);
+      }
       sendJson(res, 200, { ok: true });
       return;
     }
