@@ -46,6 +46,12 @@ Cambia esta clave (o crea tu usuario real y elimina este) desde
 Configuración → Gestión de accesos apenas entres, ya que es una
 credencial pública documentada aquí.
 
+## Conector MCP para claude.ai
+El mismo servidor ofrece un conector MCP en `/mcp` (con OAuth en `/oauth/*`)
+para usar la app desde Claude con los usuarios y perfiles existentes. Ver
+[MCP.md](MCP.md): herramientas, permisos, auditoría, pruebas y el ambiente de
+staging gratuito (`render.staging.yaml`).
+
 ## Notas técnicas
 - Sin dependencias externas más allá de `pg` (cliente de PostgreSQL):
   el servidor usa los módulos nativos `http` y `crypto` de Node, sin

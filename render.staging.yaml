@@ -1,0 +1,50 @@
+# Blueprint de STAGING del conector MCP (claude.ai) — costo $0.
+#
+# Es un archivo APARTE de render.yaml (producción) y no lo modifica: se
+# usa solo creando un Blueprint nuevo en Render con "Blueprint Path" =
+# render.staging.yaml. Todo lo de aquí tiene nombres propios, su propia
+# base de datos y solo datos de prueba inventados.
+#
+# Costo: ambos recursos van con plan "free" EXPLÍCITO (si faltara, Render
+# podría asignar un plan pagado por defecto). Limitaciones del plan gratis:
+#   - El servicio se suspende tras ~15 min sin tráfico; la primera
+#     solicitud después tarda cerca de un minuto en despertar.
+#   - La base de datos gratuita EXPIRA a los 30 días de creada (Render
+#     avisa y da un plazo corto para pasarla a pagada; si no, la elimina).
+#     Para staging basta con borrarla y crearla de nuevo: los datos de
+#     prueba se vuelven a sembrar solos.
+#   - Render permite una sola base de datos gratuita activa por cuenta.
+
+services:
+  - type: web
+    name: pehuen-api-staging          # distinto del de producción (lo verifica scripts/datos-prueba.js)
+    runtime: node
+    plan: free                         # $0 — no cambiar
+    region: oregon                     # misma región que la base de datos
+    branch: feature/conector-mcp       # rama del conector; NUNCA main
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: pehuen-db-staging
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: CORS_ORIGIN
+        value: "*"
+      # Siembra 2 empresas ficticias al arrancar, solo si la base está vacía
+      # (se niega si encuentra cualquier dato que no sea de prueba).
+      - key: SEMBRAR_DATOS_PRUEBA
+        value: "true"
+      # Clave de todos los usuarios de prueba; Render la genera al azar y
+      # se ve en Environment del servicio.
+      - key: CLAVE_DATOS_PRUEBA
+        generateValue: true
+
+databases:
+  - name: pehuen-db-staging
+    plan: free                         # $0 — no cambiar
+    region: oregon
+    ipAllowList: []                    # sin acceso desde Internet: solo el servicio de staging se conecta

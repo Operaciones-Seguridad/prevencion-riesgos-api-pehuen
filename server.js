@@ -1346,6 +1346,13 @@ async function seedIfEmpty() {
 }
 
 // ---------- servidor HTTP ----------
+// ---------- Conector MCP para claude.ai (ver mcp/ y MCP.md) ----------
+// Atiende solo /mcp, /oauth/* y /.well-known/*; no toca ninguna ruta /api.
+// Se activa en main() únicamente si sus tablas (mcp/schema.sql) quedaron
+// listas -- si no, la app funciona exactamente igual, sin conector.
+const { crearConector } = require("./mcp");
+let conectorMcp = null;
+
 const server = http.createServer(async (req, res) => {
   setCors(req, res);
   if (req.method === "OPTIONS") { res.writeHead(204); res.end(); return; }
@@ -1355,6 +1362,8 @@ const server = http.createServer(async (req, res) => {
 
   try {
     if (url.pathname === "/health") { sendJson(res, 200, { ok: true }); return; }
+
+    if (conectorMcp && (await conectorMcp.manejar(req, res, url))) return;
 
     if (parts[0] !== "api") { sendJson(res, 404, { error: "No encontrado." }); return; }
 
@@ -1851,7 +1860,22 @@ async function main() {
   } catch (err) {
     console.error("No se pudo preparar la tabla login_log (el registro de ingresos queda desactivado):", err.message);
   }
+  // Conector MCP: tablas propias en mcp/schema.sql, protegidas igual que login_log.
+  try {
+    await pool.query(require("fs").readFileSync(require("path").join(__dirname, "mcp", "schema.sql"), "utf8"));
+    if (!JWT_SECRET) throw new Error("falta JWT_SECRET");
+    conectorMcp = crearConector({ pool, dbFindUsuariosPorEmail, dbGetEmpresa, verifyPassword, secreto: JWT_SECRET });
+    console.log(`Conector MCP activo en /mcp (${conectorMcp.herramientas.length} herramientas).`);
+  } catch (err) {
+    console.error("No se pudo activar el conector MCP (la app sigue funcionando sin él):", err.message);
+  }
   await seedIfEmpty();
+  // Solo en STAGING: siembra datos de prueba inventados (ver scripts/datos-prueba.js,
+  // que además se niega a correr si la base ya tiene datos reales).
+  if (process.env.SEMBRAR_DATOS_PRUEBA === "true") {
+    try { await require("./scripts/datos-prueba").sembrarSiCorresponde(pool, { hashPassword }); }
+    catch (err) { console.error("No se sembraron datos de prueba:", err.message); }
+  }
   server.listen(PORT, () => console.log(`API de Prevención de Riesgos (multi-empresa) escuchando en el puerto ${PORT}`));
 }
 main().catch((err) => { console.error("No se pudo iniciar el servidor:", err); process.exit(1); });
