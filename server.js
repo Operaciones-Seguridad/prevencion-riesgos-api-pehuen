@@ -401,7 +401,16 @@ function permitirRegistroPublico(ip) {
 // configurada; si no lo está, se informa un error claro en vez de fallar de
 // forma confusa. Usa fetch nativo de Node (disponible desde Node 18+), sin
 // agregar ninguna dependencia nueva.
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
+// La clave se limpia: al pegarla en Render suelen colarse espacios, saltos de línea, comillas
+// o el texto "ANTHROPIC_API_KEY=", y con eso Anthropic responde "invalid x-api-key".
+const ANTHROPIC_API_KEY = String(process.env.ANTHROPIC_API_KEY || "")
+  .replace(/^\s*(export\s+)?ANTHROPIC_API_KEY\s*=\s*/i, "")
+  .replace(/^\s*Bearer\s+/i, "")
+  .replace(/[\s"'`]+/g, "");
+// Aviso en el registro del servidor (sin mostrar la clave): sirve para comprobar que se leyó bien.
+console.log(ANTHROPIC_API_KEY
+  ? `IA: clave configurada (${ANTHROPIC_API_KEY.length} caracteres, empieza con "${ANTHROPIC_API_KEY.slice(0, 7)}")${ANTHROPIC_API_KEY.startsWith("sk-ant-") ? "" : " -- ATENCIÓN: una clave de Anthropic empieza con sk-ant-"}.`
+  : "IA: no hay clave ANTHROPIC_API_KEY configurada.");
 const ANTHROPIC_MODEL = "claude-sonnet-5";
 
 // Los prompts piden texto plano, pero el modelo a veces igual devuelve
