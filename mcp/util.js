@@ -59,6 +59,9 @@ function normEspacios(s) { return String(s || "").toLowerCase().replace(/\s+/g, 
 // devolver megabytes a Claude ni guardarlos en la auditoría.
 function esAdjunto(v) { return typeof v === "string" && v.length > 200 && /^data:[^;,]+(;[^,]*)?,/.test(v); }
 function omitirAdjuntos(valor, modo = "salida") {
+  // Las fechas (p. ej. "momento" de la auditoría, que pg entrega como Date)
+  // se devuelven en ISO; si no, Object.entries las dejaría como {}.
+  if (valor instanceof Date) return isNaN(valor) ? null : valor.toISOString();
   if (Array.isArray(valor)) return valor.map((x) => omitirAdjuntos(x, modo));
   if (valor && typeof valor === "object") {
     const out = {};

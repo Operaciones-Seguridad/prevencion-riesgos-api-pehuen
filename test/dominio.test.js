@@ -152,4 +152,6 @@ test("adjuntos en base64 se omiten en respuestas y se resumen en auditoría", ()
   assert.equal(aud.adjuntoOmitido, true);
   assert.equal(aud.bytes, data.length);
   assert.equal(U.omitirAdjuntos({ texto: "data:corto" }).texto, "data:corto");
+  // las fechas no se pierden (bug visto en staging: "momento": {} en la auditoría)
+  assert.equal(U.omitirAdjuntos({ momento: new Date("2026-11-15T14:00:00Z") }).momento, "2026-11-15T14:00:00.000Z");
 });

@@ -498,6 +498,7 @@ test("Auditoría: cada escritura del conector quedó registrada y solo el admin 
   assert.equal(rows[0].n, 0, "no hay auditorías de registros inexistentes (nada se borró)");
   const r = await H("admin", "auditoria_listar", { store: "matriz", limite: 5, incluir_valores: true });
   assert.ok(r.datos.length > 0 && r.datos[0].valor_nuevo);
+  assert.match(r.datos[0].momento, /^\d{4}-\d{2}-\d{2}T/, "la fecha de la auditoría se muestra");
   assert.equal((await H("prevencionista", "auditoria_listar", {})).error, true);
   assert.equal((await H("sur", "auditoria_listar", {})).datos.filter((a) => a.store === "matriz").length, 0, "la auditoría también está aislada por empresa");
 });
