@@ -35,7 +35,7 @@ clientes por error. Quitar una empresa corta de inmediato sus conexiones.
   - Las tablas del conector se crean aparte, en `mcp/schema.sql`, protegidas con `try/catch`: si algo fallara al crearlas, la API arranca igual, solo que sin conector.
 - **Tokens propios:** los tokens del conector son distintos de los de sesión de la app y no sirven para `/api`, ni al revés.
 
-## Herramientas (54)
+## Herramientas (58)
 
 Ninguna herramienta elimina. Todas declaran `destructiveHint: false`, así que claude.ai pide confirmación antes de cada escritura.
 
@@ -73,6 +73,9 @@ Ninguna herramienta elimina. Todas declaran `destructiveHint: false`, así que c
   - `investigacion_accidente_guardar`: la investigación formal, una por accidente.
   - `arbol_causas_crear`, `arbol_causas_actualizar`: los hechos se citan entre sí por referencia; se rechazan ciclos y se avisa si hay palabras de juicio.
   - `investigacion_transito_crear`, `investigacion_transito_actualizar`: cargan el μ de la superficie y el tiempo de reacción como el formulario, responden la lista de verificación por número de ítem y **agregan fotos** (JPG/PNG/WEBP, máx. 1,5 MB c/u, 6 por llamada, 20 en total). Devuelven lo que falta para completar la investigación (la misma lista de la app) y el cálculo de velocidad y distancias.
+- **Dotación y DS 67:**
+  - `dotacion_listar`, `dotacion_cargar`: carga en bloque la dotación mensual (por ejemplo, los 36 meses del simulador DS 67 de la mutualidad). Las horas-hombre son opcionales: quedan en 0 para completarlas después en la app. Acepta meses con 0 trabajadores, que cuentan en el promedio igual que en la mutualidad. No sobrescribe una dotación distinta sin `sobrescribir=true` y conserva las horas-hombre ya registradas.
+  - `ds67_evaluacion`, `ds67_evaluacion_guardar`: calcula la evaluación como la app y guarda los datos que informa la mutualidad (factor y tasa de invalideces y muertes, corrección de días perdidos por período).
 - **Videos:** la app no guarda videos. Desde Claude Code se pueden extraer cuadros de un video y adjuntarlos como fotos de la investigación de tránsito; desde claude.ai, las fotos se adjuntan en la app.
 
 **Trabajadores**
@@ -124,7 +127,7 @@ La tabla está fuera de `records`, así que ninguna ruta de la app puede leerla 
 
 ## Pruebas
 ```bash
-npm test                     # 54 pruebas (unitarias + integración OAuth/MCP/permisos/módulos/auditoría)
+npm test                     # 59 pruebas (unitarias + integración OAuth/MCP/permisos/módulos/auditoría)
 node scripts/paridad-app.js ../prevencion-riesgos-app-pehuen/index.html [foto.jpg]   # paridad con la app real (Playwright)
 ```
 - **Base de datos:** las pruebas usan una base PostgreSQL **local** desechable (`postgres://pehuen_test:pehuen_test@localhost/pehuen_test`, o la de `TEST_DATABASE_URL`) que **se borra entera** en cada corrida. Por eso se niegan a correr si el servidor no es `localhost` o si el nombre de la base no contiene «test».

@@ -57,6 +57,12 @@ const ok = (c, m) => { console.log((c ? "OK   " : "FALLA") + " " + m); if (!c) p
   await H("arbol_causas_crear", { accidente_id: accR.id, hecho_central: "Paridad: lesión del conductor", hechos: [{ ref: "a", texto: "Paridad: camión no frena a tiempo", tipo: "material" }, { ref: "b", texto: "Paridad: huella de frenado de 30 m", tipo: "entorno", antecede_a: ["a"] }] });
   const foto = process.argv[3] ? "data:image/jpeg;base64," + fs.readFileSync(process.argv[3]).toString("base64") : null;
   const trn = await H("investigacion_transito_crear", Object.assign({ fecha: "2026-11-10", hora: "14:19", area: "Terreno", accidente_id: accR.id, tipo_accidente: "colision-trasera", vehiculo: "Paridad: camión", condicion_calzada: "grava", estado_conductor: "fatiga", velocidad_conocida: 70, velocidad_maxima: 60, lista_verificacion: [{ item: 1, estado: "ok" }, { item: 2, estado: "fail" }] }, foto ? { fotos: [foto] } : {}));
+  // Dotación y DS 67 (patrón del simulador de la mutualidad, con meses en 0)
+  const mesesDs67 = require("../mcp/dominio/ds67").periodos(2027).flatMap((p) => p.meses);
+  const dot = [10, 12, 12, 11, 12, 12, 8, 6, 8, 8, 10, 11, 9, 9, 9, 10, 11, 11, 11, 11, 12, 4, 11, 2, 2, 2, 0, 0, 7, 7, 7, 7, 7, 7, 7, 7];
+  await H("dotacion_cargar", { meses: mesesDs67.map((m, i) => ({ periodo: m, promedio_trabajadores: dot[i] })) });
+  await H("ds67_evaluacion_guardar", { anio_evaluacion: 2027, dias_perdidos: [1, 2, 3].map((n) => ({ periodo: n, accidentes_trabajo: 0, enfermedad_profesional: 0 })) });
+  const evConector = await H("ds67_evaluacion", { anio_evaluacion: 2027 });
   console.log("escrituras con el conector: listas");
 
   // 2) la app real
@@ -102,6 +108,15 @@ const ok = (c, m) => { console.log((c ? "OK   " : "FALLA") + " " + m); if (!c) p
   if (foto) ok(enForm.fotos === 1, "Tránsito: la app muestra la foto adjuntada por el conector");
   const arbolOk = await page.evaluate(() => { const a = CACHE.arbolesCausales.find((x) => x.hechoCentral === "Paridad: lesión del conductor"); startEditArbol(a.id); return document.getElementById("arbolTreeWrap").textContent; });
   ok(/Paridad: huella de frenado de 30 m/.test(arbolOk) && /Paridad: camión no frena a tiempo/.test(arbolOk), "Árbol de causas: la app dibuja los hechos y sus vínculos");
+  const evApp = await page.evaluate(() => { const e = calcDs67Evaluacion(2027); return { prom: e.periodos.map((p) => Math.round(p.promedioTrabajadores * 100) / 100), tasas: e.periodos.map((p) => p.tasa), total: e.tasaSiniestralidadTotal, faltan: e.mesesFaltantes.length }; });
+  ok(JSON.stringify(evApp.prom) === JSON.stringify(evConector.periodos.map((p) => p.promedioTrabajadores)) && JSON.stringify(evApp.tasas) === JSON.stringify(evConector.periodos.map((p) => p.tasa)) && evApp.total === evConector.tasaSiniestralidadTotal && evApp.faltan === 0,
+    "DS 67: la app calcula los mismos promedios y tasas que el conector → " + JSON.stringify(evApp));
+  const hhEdit = await page.evaluate(async () => {
+    document.getElementById("hhPeriodo").value = "2025-03"; document.getElementById("hhHoras").value = "1700"; document.getElementById("hhPromedio").value = "8";
+    document.getElementById("saveHHBtn").click(); await new Promise((r) => setTimeout(r, 2500));
+    const regs = CACHE.horasHombre.filter((h) => h.periodo === "2025-03"); return { n: regs.length, hh: regs[0] && regs[0].horasHombre };
+  });
+  ok(hhEdit.n === 1 && +hhEdit.hh === 1700, "Horas-hombre: completarlas desde el formulario de la app actualiza el mes cargado por el conector (sin duplicar)");
   const invOk = await page.evaluate((id) => { abrirModalInvestigacionAccidente(CACHE.accidentes.find((a) => a.id === id)); const v = document.getElementById("invNombre").value; closeModal(); return v; }, accR.id);
   ok(invOk === "Felipe Ejemplo Seis", "Investigación formal: la app la abre con los datos del conector");
 
