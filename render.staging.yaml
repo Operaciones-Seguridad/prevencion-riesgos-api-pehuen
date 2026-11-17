@@ -34,6 +34,10 @@ services:
         generateValue: true
       - key: CORS_ORIGIN
         value: "*"
+      # Empresas que pueden usar el conector ("*" = todas). En staging solo
+      # existen empresas ficticias. En producción va la lista explícita.
+      - key: MCP_EMPRESAS_PERMITIDAS
+        value: "*"
       # Siembra 2 empresas ficticias al arrancar, solo si la base está vacía
       # (se niega si encuentra cualquier dato que no sea de prueba).
       - key: SEMBRAR_DATOS_PRUEBA

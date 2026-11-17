@@ -1,0 +1,218 @@
+{
+ "_origen": "Copiado de index.html (app prevencion-riesgos-app-pehuen), módulo Accidentabilidad. Regenerar con scripts/extraer-catalogos-app.js.",
+ "ACC_TIPO_LABEL": {
+  "ctp": "Con tiempo perdido",
+  "stp": "Sin tiempo perdido",
+  "trayecto": "Trayecto",
+  "incidente": "Incidente / cuasi accidente",
+  "enfermedad": "Enfermedad profesional"
+ },
+ "ACC_CRITERIOS_GRAVE": [
+  {
+   "key": "amputacion",
+   "texto": "Amputación inmediata o pérdida de partes del cuerpo"
+  },
+  {
+   "key": "reanimacion",
+   "texto": "Requiere maniobras de reanimación"
+  },
+  {
+   "key": "rescate",
+   "texto": "Requiere maniobras de rescate"
+  },
+  {
+   "key": "caida",
+   "texto": "Caída de altura de más de 1,8 metros"
+  },
+  {
+   "key": "hiperbarica",
+   "texto": "Ocurre en condiciones hiperbáricas"
+  },
+  {
+   "key": "faenas",
+   "texto": "Afecta a un número de trabajadores tal que altera el desarrollo normal de las faenas"
+  }
+ ],
+ "ACC_GRAVEDAD_LABEL": {
+  "leve": "No grave ni fatal",
+  "grave": "Grave",
+  "fatal": "Fatal"
+ },
+ "INV_TIPO_EVENTO": [
+  "Con Incapacidad",
+  "Sin Incapacidad",
+  "Enfermedad Profesional",
+  "Incidente"
+ ],
+ "INV_PARTES_CUERPO": [
+  "Ninguno",
+  "Cabeza",
+  "Ojos",
+  "Cara",
+  "Manos",
+  "Brazo",
+  "Tronco",
+  "Piernas",
+  "Pies",
+  "Múltiples"
+ ],
+ "INV_TIPO_ACCIDENTE": [
+  "Golpe con (objetos manejados por el mismo accidentado)",
+  "Golpe por (objetos o materiales ajenos al accidentado)",
+  "Golpe contra (la persona se golpea con objeto de su medio ambiente)",
+  "Caída del mismo nivel",
+  "Caída de distinto nivel",
+  "Prendimiento (retención de personas por elementos sobresalientes)",
+  "Atrapamiento (la persona es oprimida, aplastada, apretada o comprimida entre objetos)",
+  "Aprisionamiento (la persona queda encerrada en algún recinto, ej. espacio confinado)",
+  "Sobreesfuerzo (esfuerzo mal realizado o por sobre la capacidad)",
+  "Contacto por (la persona es tocada por objeto/sustancia que inflige lesión no producida por la fuerza: ácido, metal caliente, etc.)",
+  "Contacto con (la persona hace contacto con objeto/sustancia que inflige lesión no producida por la fuerza)",
+  "Contacto eléctrico",
+  "Arco eléctrico",
+  "Tránsito (choque o colisión en que la persona tuvo participación activa)",
+  "Tránsito por terceros (choque en que la persona no tuvo participación activa)",
+  "Mordedura de perros",
+  "Asalto",
+  "Otras causas"
+ ],
+ "INV_ACCION_SUBESTANDAR": [
+  "Asumir posiciones o posturas inseguras",
+  "Dejar inoperantes los dispositivos de seguridad",
+  "Desviarse de procedimientos de trabajo recomendados",
+  "Distraerse en juegos u otros",
+  "No advertir o señalar riesgos según se requiera",
+  "No utilizar elementos de protección personal",
+  "Operar a velocidad insegura",
+  "Operar máquinas/equipos sin autorización",
+  "Reparar, conducir equipos sin considerar los riesgos",
+  "Usar en forma insegura materiales, equipos, herramientas",
+  "Usar herramientas, instrumental y/o equipos inseguros",
+  "No se detectó acción subestándar"
+ ],
+ "INV_CONDICION_SUBESTANDAR": [
+  "Almacenamiento deficiente",
+  "Congestión y espacio libre insuficiente",
+  "Construcciones o instalaciones inseguras",
+  "Defectos de maquinarias, materiales o herramientas",
+  "Equipos sin protección",
+  "Falta de adecuados sistemas de advertencia",
+  "Falta de adecuados sistemas de seguridad",
+  "Falta de orden y aseo",
+  "Objetos que sobresalen",
+  "Propensión a arder o explotar",
+  "No se detectó condición subestándar"
+ ],
+ "INV_FACTORES_PERSONALES": [
+  "Capacidad física disminuida",
+  "Capacidad mental / sicológica inadecuada",
+  "Tensión física o fisiológica",
+  "Tensión mental o fisiológica",
+  "Falta de conocimiento",
+  "Falta de habilidad",
+  "Motivación inadecuada"
+ ],
+ "INV_FACTORES_TRABAJO": [
+  "Supervisión y liderazgo deficiente",
+  "Ingeniería inadecuada",
+  "Deficiencia en las adquisiciones",
+  "Mantención deficiente",
+  "Herramientas y equipos inadecuados",
+  "Estándares deficientes de trabajo",
+  "Uso y desgaste",
+  "Condiciones ambientales adversas"
+ ],
+ "ARBOL_TIPO_LABEL": {
+  "individuo": "Individuo",
+  "tarea": "Tarea / método",
+  "material": "Material / equipo",
+  "entorno": "Medio (entorno)",
+  "gestion": "Gestión / organización"
+ },
+ "ARBOL_PLAZO_LABEL": {
+  "corto": "Corto plazo",
+  "mediano": "Mediano plazo",
+  "largo": "Largo plazo"
+ },
+ "TRANSITO_TIPO_LABEL": {
+  "colision-frontal": "Colisión frontal",
+  "colision-lateral": "Colisión lateral",
+  "colision-trasera": "Colisión trasera (alcance)",
+  "choque-objeto-fijo": "Choque con objeto fijo",
+  "volcamiento": "Volcamiento",
+  "atropello": "Atropello",
+  "salida-via": "Salida de la vía / despiste"
+ },
+ "TRANSITO_TIEMPO_REACCION_SUGERIDO": {
+  "normal": 1,
+  "fatiga": 2,
+  "alcohol-drogas": 3,
+  "se-desconoce": 1
+ },
+ "TRANSITO_CHECKLIST_ITEMS": [
+  "Se registró si el conductor usaba el celular al momento del hecho",
+  "La señalización vial en el lugar era adecuada y visible",
+  "Existía segregación adecuada entre vehículos y peatones/otras vías, si correspondía",
+  "Se verificó el estado de los neumáticos del/los vehículo(s) involucrado(s)",
+  "Se verificó que el vehículo contaba con revisión técnica y mantenimiento vigente",
+  "Se registró el uso de cinturón de seguridad",
+  "Se registraron las condiciones climáticas y de visibilidad al momento del hecho",
+  "Se midieron y fotografiaron las huellas de frenado/derrape, si existían",
+  "Se fotografió la posición final de los vehículos y el lugar del hecho",
+  "Se identificaron testigos y se registró su versión de los hechos",
+  "Se verificó la licencia de conducir y su vigencia/categoría",
+  "Se verificó si el conductor contaba con capacitación en conducción segura vigente",
+  "Se evaluó si el vehículo mantenía una distancia de seguimiento segura respecto al vehículo de adelante, acorde a su velocidad",
+  "Se verificó si los neumáticos estaban desinflados o dañados al momento del hecho",
+  "Se registró si la tracción (4x4/AWD) estaba activada al momento del hecho",
+  "Se registró si el vehículo llevaba carga que pudo elevar su centro de gravedad",
+  "Se registró si la carga del otro vehículo involucrado (si llevaba) se desplazó producto del impacto"
+ ],
+ "COEF_FRICCION_REF": {
+  "asfalto-seco": {
+   "label": "Asfalto/hormigón seco",
+   "mu": 0.75
+  },
+  "asfalto-mojado": {
+   "label": "Asfalto mojado",
+   "mu": 0.45
+  },
+  "hormigon-mojado": {
+   "label": "Hormigón mojado",
+   "mu": 0.55
+  },
+  "grava": {
+   "label": "Grava",
+   "mu": 0.6
+  },
+  "tierra-seca": {
+   "label": "Tierra seca",
+   "mu": 0.65
+  },
+  "tierra-humeda": {
+   "label": "Tierra húmeda",
+   "mu": 0.55
+  },
+  "nieve": {
+   "label": "Nieve dura",
+   "mu": 0.2
+  },
+  "hielo": {
+   "label": "Hielo",
+   "mu": 0.1
+  }
+ },
+ "INCIDENTE_TIPOS_BASE": [
+  "Caída de objetos",
+  "Caída de personas",
+  "Golpe o atrapamiento",
+  "Contacto con energía eléctrica",
+  "Derrame o fuga",
+  "Conato de incendio",
+  "Choque o colisión de vehículo o equipo",
+  "Falla de equipo o herramienta",
+  "Acto inseguro observado",
+  "Condición insegura",
+  "Otro"
+ ]
+}

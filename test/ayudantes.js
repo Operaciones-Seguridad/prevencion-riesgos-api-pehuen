@@ -32,7 +32,7 @@ async function arrancarServidor(envExtra = {}) {
   verificarBaseLocal();
   const port = puertoSiguiente++;
   const hijo = spawn(process.execPath, [path.join(__dirname, "..", "server.js")], {
-    env: Object.assign({}, process.env, { DATABASE_URL, JWT_SECRET: "secreto-de-pruebas", PORT: String(port), MCP_REDIRECT_URIS: `https://claude.ai/api/mcp/auth_callback,${REDIRECT}`, RENDER_EXTERNAL_URL: "" }, envExtra),
+    env: Object.assign({}, process.env, { DATABASE_URL, JWT_SECRET: "secreto-de-pruebas", PORT: String(port), MCP_REDIRECT_URIS: `https://claude.ai/api/mcp/auth_callback,${REDIRECT}`, RENDER_EXTERNAL_URL: "", MCP_EMPRESAS_PERMITIDAS: "*" }, envExtra),
     stdio: ["ignore", "pipe", "pipe"],
   });
   let log = "";

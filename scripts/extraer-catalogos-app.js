@@ -32,6 +32,13 @@ function literal(nombre) {
   return vm.runInNewContext("(" + src.slice(j, k + 1) + ")", Object.create(null), { timeout: 1000 });
 }
 
+// Lee un arreglo literal escrito en una sola línea como `clave: [ ... ],`.
+function listaEnLinea(clave) {
+  const m = new RegExp(`\\b${clave}: (\\[[^\\n]*\\]),`).exec(src);
+  if (!m) throw new Error(`No se encontró la lista ${clave}`);
+  return vm.runInNewContext("(" + m[1] + ")", Object.create(null), { timeout: 1000 });
+}
+
 const simbolos = literal("ANEXO1_SIMBOLOS").map(({ icons, ...r }) => r);
 const salida = {
   _origen: "Copiado de index.html (app prevencion-riesgos-app-pehuen): ANEXO1_SIMBOLOS (sin iconos), JERARQUIA_DS44 y catálogos base. Si la app cambia estas constantes, regenerar con scripts/extraer-catalogos-app.js.",
@@ -44,4 +51,29 @@ const salida = {
 };
 const destino = path.join(__dirname, "..", "mcp", "dominio", "catalogos-app.json");
 fs.writeFileSync(destino, JSON.stringify(salida, null, 1));
+
+// Accidentabilidad (fase 2): listas oficiales de la app.
+const acc = {
+  _origen: "Copiado de index.html (app prevencion-riesgos-app-pehuen), módulo Accidentabilidad. Regenerar con scripts/extraer-catalogos-app.js.",
+  ACC_TIPO_LABEL: literal("ACC_TIPO_LABEL"),
+  ACC_CRITERIOS_GRAVE: literal("ACC_CRITERIOS_GRAVE"),
+  ACC_GRAVEDAD_LABEL: literal("ACC_GRAVEDAD_LABEL"),
+  INV_TIPO_EVENTO: literal("INV_TIPO_EVENTO"),
+  INV_PARTES_CUERPO: literal("INV_PARTES_CUERPO"),
+  INV_TIPO_ACCIDENTE: literal("INV_TIPO_ACCIDENTE"),
+  INV_ACCION_SUBESTANDAR: literal("INV_ACCION_SUBESTANDAR"),
+  INV_CONDICION_SUBESTANDAR: literal("INV_CONDICION_SUBESTANDAR"),
+  INV_FACTORES_PERSONALES: literal("INV_FACTORES_PERSONALES"),
+  INV_FACTORES_TRABAJO: literal("INV_FACTORES_TRABAJO"),
+  ARBOL_TIPO_LABEL: literal("ARBOL_TIPO_LABEL"),
+  ARBOL_PLAZO_LABEL: literal("ARBOL_PLAZO_LABEL"),
+  TRANSITO_TIPO_LABEL: literal("TRANSITO_TIPO_LABEL"),
+  TRANSITO_TIEMPO_REACCION_SUGERIDO: literal("TRANSITO_TIEMPO_REACCION_SUGERIDO"),
+  TRANSITO_CHECKLIST_ITEMS: literal("TRANSITO_CHECKLIST_ITEMS"),
+  COEF_FRICCION_REF: literal("COEF_FRICCION_REF"),
+  INCIDENTE_TIPOS_BASE: listaEnLinea("tipoIncidente"),
+};
+const destinoAcc = path.join(__dirname, "..", "mcp", "dominio", "catalogos-accidentabilidad.json");
+fs.writeFileSync(destinoAcc, JSON.stringify(acc, null, 1));
+console.log(`Escrito ${destinoAcc}: ${acc.TRANSITO_CHECKLIST_ITEMS.length} ítems de tránsito, ${acc.ACC_CRITERIOS_GRAVE.length} criterios de gravedad.`);
 console.log(`Escrito ${destino}: ${simbolos.length} símbolos, ${salida.CATALOG_BASE.peligro.length} peligros base.`);

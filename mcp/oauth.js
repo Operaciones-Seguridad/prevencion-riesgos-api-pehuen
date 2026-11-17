@@ -13,6 +13,7 @@
 const crypto = require("crypto");
 const { sha256, tokenAleatorio } = require("./util");
 const paginas = require("./paginas");
+const { empresaHabilitada } = require("./contexto");
 
 const ALCANCES = ["lectura", "escritura"];
 const TTL_ACCESO_S = 3600;
@@ -226,14 +227,19 @@ function crearOAuth(deps) {
     const ok = candidatos.filter((c) => c.data.activo !== false && verifyPassword(clave, c.data.claveHash));
     if (!ok.length) return { error: MSG };
     const opciones = [];
-    let pendiente = false;
+    let pendiente = false, noHabilitada = false;
     for (const c of ok) {
       const e = await dbGetEmpresa(c.companyId);
       if (!e || e.activo === false) continue;
       if (e.aprobada === false) { pendiente = true; continue; }
+      if (!empresaHabilitada(e)) { noHabilitada = true; continue; }
       opciones.push({ companyId: c.companyId, usuarioId: c.data.id, empresaNombre: e.nombre });
     }
-    if (!opciones.length) return { error: pendiente ? "Tu empresa todavía está pendiente de aprobación." : MSG };
+    if (!opciones.length) {
+      // La clave ya se validó: informar el motivo real no expone datos ajenos.
+      if (noHabilitada) return { error: "Tu empresa todavía no tiene habilitada la conexión con Claude. Pide al administrador de la plataforma que la habilite." };
+      return { error: pendiente ? "Tu empresa todavía está pendiente de aprobación." : MSG };
+    }
     return { opciones };
   }
 
@@ -308,7 +314,7 @@ function crearOAuth(deps) {
 
   async function usuarioSigueHabilitado(companyId, usuarioId) {
     const e = await dbGetEmpresa(companyId);
-    if (!e || e.activo === false || e.aprobada === false) return false;
+    if (!e || e.activo === false || e.aprobada === false || !empresaHabilitada(e)) return false;
     const { rows } = await pool.query("SELECT data FROM records WHERE company_id = $1 AND store = 'accesoUsuarios' AND id = $2", [companyId, usuarioId]);
     return !!(rows[0] && rows[0].data.activo !== false);
   }
