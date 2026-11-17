@@ -7,6 +7,13 @@ con el **mismo correo y clave** que la persona usa en la app, y queda limitado a
 
 Fase 1: Matriz de riesgos (MIPER, con Plan de acción y riesgo residual),
 Programa de seguridad, Capacitación, Control documental y Trabajadores.
+Fase 2: Accidentabilidad (accidentes, incidentes, investigación formal,
+árbol de causas e investigación de accidentes de tránsito, con fotos).
+
+**Empresas habilitadas:** solo las de la variable `MCP_EMPRESAS_PERMITIDAS`
+(ids o nombres separados por coma, o `*` para todas). Si no existe, ninguna
+empresa puede conectarse: así publicar el conector nunca lo abre a todos los
+clientes por error. Quitar una empresa corta de inmediato sus conexiones.
 
 ## Cómo funciona
 
@@ -28,7 +35,7 @@ Programa de seguridad, Capacitación, Control documental y Trabajadores.
   - Las tablas del conector se crean aparte, en `mcp/schema.sql`, protegidas con `try/catch`: si algo fallara al crearlas, la API arranca igual, solo que sin conector.
 - **Tokens propios:** los tokens del conector son distintos de los de sesión de la app y no sirven para `/api`, ni al revés.
 
-## Herramientas (41)
+## Herramientas (54)
 
 Ninguna herramienta elimina. Todas declaran `destructiveHint: false`, así que claude.ai pide confirmación antes de cada escritura.
 
@@ -58,6 +65,15 @@ Ninguna herramienta elimina. Todas declaran `destructiveHint: false`, así que c
 **Control documental** (vista `documentos`)
 - Lectura: `documentos_listar`, `documento_detalle`, `documentos_vencidos`
 - Escritura: `documento_crear`, `documento_actualizar`
+
+**Accidentabilidad** (vista `accidentabilidad`)
+- Lectura: `accidentabilidad_catalogos`, `accidentes_listar`, `accidente_detalle`, `investigaciones_transito_listar`, `investigacion_transito_detalle`
+- Escritura:
+  - `accidente_registrar`, `incidente_registrar`, `accidente_actualizar`: mismas validaciones de la app (criterio SUSESO si es grave, fecha de la DIAT/DIEP) y avisos legales de suspensión y notificación.
+  - `investigacion_accidente_guardar`: la investigación formal, una por accidente.
+  - `arbol_causas_crear`, `arbol_causas_actualizar`: los hechos se citan entre sí por referencia; se rechazan ciclos y se avisa si hay palabras de juicio.
+  - `investigacion_transito_crear`, `investigacion_transito_actualizar`: cargan el μ de la superficie y el tiempo de reacción como el formulario, responden la lista de verificación por número de ítem y **agregan fotos** (JPG/PNG/WEBP, máx. 1,5 MB c/u, 6 por llamada, 20 en total). Devuelven lo que falta para completar la investigación (la misma lista de la app) y el cálculo de velocidad y distancias.
+- **Videos:** la app no guarda videos. Desde Claude Code se pueden extraer cuadros de un video y adjuntarlos como fotos de la investigación de tránsito; desde claude.ai, las fotos se adjuntan en la app.
 
 **Trabajadores**
 - Lectura (cualquiera de los módulos anteriores o `config`): `trabajadores_listar`, `trabajador_detalle`
@@ -108,8 +124,8 @@ La tabla está fuera de `records`, así que ninguna ruta de la app puede leerla 
 
 ## Pruebas
 ```bash
-npm test                     # 43 pruebas (unitarias + integración OAuth/MCP/permisos/módulos/auditoría)
-node scripts/paridad-app.js ../prevencion-riesgos-app-pehuen/index.html   # paridad con la app real (Playwright)
+npm test                     # 54 pruebas (unitarias + integración OAuth/MCP/permisos/módulos/auditoría)
+node scripts/paridad-app.js ../prevencion-riesgos-app-pehuen/index.html [foto.jpg]   # paridad con la app real (Playwright)
 ```
 - **Base de datos:** las pruebas usan una base PostgreSQL **local** desechable (`postgres://pehuen_test:pehuen_test@localhost/pehuen_test`, o la de `TEST_DATABASE_URL`) que **se borra entera** en cada corrida. Por eso se niegan a correr si el servidor no es `localhost` o si el nombre de la base no contiene «test».
 - **Paridad con la app:** `scripts/paridad-app.js` escribe con el conector y comprueba, en el `index.html` real, que la app muestra esos registros, calcula los mismos niveles y estados, y puede seguir editándolos.

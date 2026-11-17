@@ -4,7 +4,10 @@
 // escribe con el conector y verifica en el index.html real de la app, en un
 // navegador (Playwright), que la app muestra y sigue editando esos registros.
 //
-//   node scripts/paridad-app.js ../prevencion-riesgos-app-pehuen/index.html
+//   node scripts/paridad-app.js ../prevencion-riesgos-app-pehuen/index.html [foto.jpg]
+//
+// Con una foto JPG opcional, también verifica que la app muestra las fotos
+// que el conector adjunta a una investigación de tránsito.
 //
 // Usa SOLO la base local de pruebas (TEST_DATABASE_URL o la de test/ayudantes.js,
 // que se borra entera) y una copia temporal del index.html apuntando a la API local.
@@ -48,6 +51,12 @@ const ok = (c, m) => { console.log((c ? "OK   " : "FALLA") + " " + m); if (!c) p
   await H("documento_crear", { tipo: "manual", nombre: "Manual del sistema de gestión", version: "4", fecha_actualizacion: "2026-10-30", fecha_revision: "2027-10-30" });
   const tr = await H("trabajador_crear", { nombre: "Paridad Trabajador Nuevo", rut: "0.000.009-0", cargo: "Maestro", area: "Taller", roles: ["comite_paritario"] });
   await H("trabajador_curso_registrar", { trabajador_id: tr.trabajador.id, curso_id: "curso-general-andes", fecha_aprobacion: "2026-10-01" });
+  // Accidentabilidad
+  const accR = await H("accidente_registrar", { tipo: "ctp", fecha: "2026-11-10", area: "Terreno", gravedad: "grave", criterios_grave: ["rescate"], denuncia_realizada: "si", fecha_denuncia: "2026-11-10", dias_perdidos: 10, causa: "Paridad: colisión de camión", descripcion: "Paridad", trabajadores_ids: ["trab-6-andes"] });
+  await H("investigacion_accidente_guardar", { accidente_id: accR.id, nombre_accidentado: "Felipe Ejemplo Seis", cargo: "Conductor", partes_cuerpo: ["Cabeza"], factores_trabajo: ["Mantención deficiente"], medidas_correctivas: [{ accion: "Paridad: revisión de frenos", responsable: "Sergio", fecha: "2026-12-01" }] });
+  await H("arbol_causas_crear", { accidente_id: accR.id, hecho_central: "Paridad: lesión del conductor", hechos: [{ ref: "a", texto: "Paridad: camión no frena a tiempo", tipo: "material" }, { ref: "b", texto: "Paridad: huella de frenado de 30 m", tipo: "entorno", antecede_a: ["a"] }] });
+  const foto = process.argv[3] ? "data:image/jpeg;base64," + fs.readFileSync(process.argv[3]).toString("base64") : null;
+  const trn = await H("investigacion_transito_crear", Object.assign({ fecha: "2026-11-10", hora: "14:19", area: "Terreno", accidente_id: accR.id, tipo_accidente: "colision-trasera", vehiculo: "Paridad: camión", condicion_calzada: "grava", estado_conductor: "fatiga", velocidad_conocida: 70, velocidad_maxima: 60, lista_verificacion: [{ item: 1, estado: "ok" }, { item: 2, estado: "fail" }] }, foto ? { fotos: [foto] } : {}));
   console.log("escrituras con el conector: listas");
 
   // 2) la app real
@@ -82,6 +91,19 @@ const ok = (c, m) => { console.log((c ? "OK   " : "FALLA") + " " + m); if (!c) p
   ok(/Manual del sistema de gestión/.test(t), "Documentos: el manual aparece");
   t = await ver("config");
   ok(t.includes("Paridad Trabajador Nuevo"), "Trabajadores: aparece en la nómina");
+  t = await ver("accidentabilidad");
+  ok(t.includes("Paridad: colisión de camión"), "Accidentabilidad: el accidente aparece en el registro");
+  const faltApp = await page.evaluate((id) => transitoCamposFaltantes(CACHE.transitoInvestigaciones.find((r) => r.id === id)), trn.id);
+  ok(JSON.stringify(faltApp) === JSON.stringify(trn.faltaParaCompletar), "Tránsito: la app calcula exactamente lo mismo que falta para completar → " + faltApp.length + " pendientes");
+  const enForm = await page.evaluate((id) => { startEditTransito(id); return { coef: document.getElementById("transitoCoefFriccion").value, reac: document.getElementById("transitoTiempoReaccion").value, fotos: document.querySelectorAll("#transitoFotosWrap img").length, item2: document.querySelector('#transitoChecklistWrap .seg[data-tridx="1"] .on-fail') !== null }; }, trn.id);
+  ok(enForm.coef === "0.6" || +enForm.coef > 0, "Tránsito: el formulario de la app carga el μ de la grava → " + enForm.coef);
+  ok(enForm.reac === "2", "Tránsito: el formulario carga el tiempo de reacción con fatiga → " + enForm.reac);
+  ok(enForm.item2, "Tránsito: la lista de verificación muestra «No cumple» en el ítem 2");
+  if (foto) ok(enForm.fotos === 1, "Tránsito: la app muestra la foto adjuntada por el conector");
+  const arbolOk = await page.evaluate(() => { const a = CACHE.arbolesCausales.find((x) => x.hechoCentral === "Paridad: lesión del conductor"); startEditArbol(a.id); return document.getElementById("arbolTreeWrap").textContent; });
+  ok(/Paridad: huella de frenado de 30 m/.test(arbolOk) && /Paridad: camión no frena a tiempo/.test(arbolOk), "Árbol de causas: la app dibuja los hechos y sus vínculos");
+  const invOk = await page.evaluate((id) => { abrirModalInvestigacionAccidente(CACHE.accidentes.find((a) => a.id === id)); const v = document.getElementById("invNombre").value; closeModal(); return v; }, accR.id);
+  ok(invOk === "Felipe Ejemplo Seis", "Investigación formal: la app la abre con los datos del conector");
 
   // 3) la app sigue pudiendo escribir sobre algo creado por el conector
   await ver("capacitacion");

@@ -8,7 +8,9 @@ const { crearProtocolo, rpcErr } = require("./protocolo");
 const { construirContexto } = require("./contexto");
 const { crearDatos } = require("./datos");
 
-const MAX_CUERPO = 1024 * 1024; // 1 MB: el conector no recibe adjuntos
+// 14 MB: alcanza para el máximo de fotos por llamada de la investigación de
+// tránsito (6 × 1,5 MB, que en base64 ocupan ~2 MB cada una).
+const MAX_CUERPO = 14 * 1024 * 1024;
 
 function crearConector(deps) {
   const { pool, dbGetEmpresa } = deps;
@@ -21,6 +23,7 @@ function crearConector(deps) {
     ...require("./herramientas/programa")(datos),
     ...require("./herramientas/capacitacion")(datos),
     ...require("./herramientas/documentos")(datos),
+    ...require("./herramientas/accidentabilidad")(datos),
   ];
   const nombres = new Set();
   for (const h of herramientas) { if (nombres.has(h.name)) throw new Error("herramienta duplicada " + h.name); nombres.add(h.name); }

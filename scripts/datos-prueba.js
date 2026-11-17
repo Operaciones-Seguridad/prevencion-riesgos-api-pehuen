@@ -31,7 +31,7 @@ function construirEmpresas(hoy, hashClave) {
     const p = (x) => `${x}-${sufijo}`;
     const perfiles = [
       { id: p("perfil-admin"), nombre: "Administrador", esAdmin: true, vistas: ["dashboard", "matriz", "programa", "capacitacion", "documentos", "config"] },
-      { id: p("perfil-prev"), nombre: "Prevencionista de Riesgos", esAdmin: false, vistas: ["dashboard", "matriz", "programa", "capacitacion", "documentos", "cumplimiento"] },
+      { id: p("perfil-prev"), nombre: "Prevencionista de Riesgos", esAdmin: false, vistas: ["dashboard", "matriz", "programa", "capacitacion", "documentos", "cumplimiento", "accidentabilidad"] },
       { id: p("perfil-sup"), nombre: "Jefe de Obra / Supervisor", esAdmin: false, vistas: ["dashboard", "realizar-inspecciones", "inspecciones", "matriz", "programa", "capacitacion", "accidentabilidad", "emergencia", "compromisos"] },
       { id: p("perfil-trab"), nombre: "Trabajador", esAdmin: false, descargaDashboard: false, vistas: ["dashboard", "realizar-inspecciones"] },
       { id: p("perfil-cap"), nombre: "Encargada de capacitación", esAdmin: false, puedeAceptarRiesgos: false, vistas: ["capacitacion"] },
@@ -114,11 +114,17 @@ function construirEmpresas(hoy, hashClave) {
       doc(4, "manual", "Manual del sistema de gestión", "3", { fechaActualizacion: d(-60), fechaConfeccion: d(-60) }),
       doc(5, "otro", "Registro sin fechas", "1", { fechaConfeccion: "", fechaActualizacion: "" }),
     ];
+    const accidentes = [
+      { id: p("acc-1"), tipo: "ctp", fecha: d(-40), areaId: taller, trabajadoresIds: [p("trab-2")], gravedad: "leve", criteriosGrave: [], denunciaRealizada: "si", fechaDenuncia: d(-39), diasPerdidos: 3, sexo: "M", focoCritico: "", causa: "Corte en mano con esmeril (dato de prueba)", descripcion: "Contacto del disco con la mano izquierda al cambiar de pieza.", informePreliminar: null, informePreliminarNombre: null, fotografia: null, investigado: false },
+      { id: p("acc-2"), tipo: "trayecto", fecha: d(-12), areaId: terreno, trabajadoresIds: [p("trab-6")], gravedad: "leve", criteriosGrave: [], denunciaRealizada: "", fechaDenuncia: "", diasPerdidos: 0, sexo: "M", focoCritico: "", causa: "Choque por alcance camino a faena (dato de prueba)", descripcion: "Vehículo particular impactado por detrás en semáforo.", informePreliminar: null, informePreliminarNombre: null, fotografia: null, investigado: false },
+      { id: p("inc-1"), tipo: "incidente", fecha: d(-5), areaId: terreno, tipoIncidente: "Caída de objetos", focoCritico: "", danioPropiedad: "no", descripcionDanio: "", trabajadoresIds: [], causa: "Herramienta cae desde canastillo (dato de prueba)", descripcion: "Sin lesionados.", gravedad: "leve", criteriosGrave: [], denunciaRealizada: "", fechaDenuncia: "", diasPerdidos: 0, sexo: "", informePreliminar: null, informePreliminarNombre: null, fotografia: null, investigado: false },
+    ];
     return {
       id, nombre, stores: {
         empresa: [{ id: "empresa-1", razonSocial: nombre, rut: "76.000.000-0", rubro, numTrabajadores }],
         accesoPerfiles: perfiles, accesoUsuarios: usuarios, areas, trabajadores, programaPersonas, matriz, planAccionMatriz: plan,
         programa, capacitaciones, cursosObligatorios, trabajadorCursos, documentos, matrizHistorial: [],
+        accidentes, accInvestigaciones: [], arbolesCausales: [], transitoInvestigaciones: [],
       },
     };
   };

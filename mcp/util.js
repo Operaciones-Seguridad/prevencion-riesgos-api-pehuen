@@ -98,6 +98,7 @@ function validarEsquema(schema, valor, ruta = "argumentos") {
       if (s.minLength && v.trim().length < s.minLength) errores.push(`${r}: no puede estar vacío`);
       if (s.maxLength && v.length > s.maxLength) errores.push(`${r}: máximo ${s.maxLength} caracteres`);
       if (s.format === "date" && !esFechaIso(v)) errores.push(`${r}: debe ser una fecha AAAA-MM-DD válida`);
+      if (s.pattern && !new RegExp(s.pattern).test(v)) errores.push(`${r}: formato no válido${s.description ? ` (${s.description})` : ""}`);
     }
     if (typeof v === "number") {
       if (s.minimum !== undefined && v < s.minimum) errores.push(`${r}: mínimo ${s.minimum}`);

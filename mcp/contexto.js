@@ -55,7 +55,8 @@ async function construirContexto(pool, dbGetEmpresa, tokenRow) {
 
 // Permiso por módulo (acordado con Carlos):
 //  - MIPER y Plan de acción → vista "matriz"; Programa → "programa";
-//    Capacitación → "capacitacion"; Documentos → "documentos".
+//    Capacitación → "capacitacion"; Documentos → "documentos";
+//    Accidentabilidad (accidentes, incidentes e investigaciones) → "accidentabilidad".
 //  - Trabajadores: leer con cualquiera de esos módulos o "config";
 //    crear/actualizar solo con "config" (donde se administran en la app).
 //  - esAdmin ve todo.
@@ -64,9 +65,10 @@ const PERMISOS = {
   programa: (c) => c.ve("programa"),
   capacitacion: (c) => c.ve("capacitacion"),
   documentos: (c) => c.ve("documentos"),
-  trabajadores_lectura: (c) => ["matriz", "programa", "capacitacion", "documentos", "config"].some((v) => c.ve(v)),
+  accidentabilidad: (c) => c.ve("accidentabilidad"),
+  trabajadores_lectura: (c) => ["matriz", "programa", "capacitacion", "documentos", "accidentabilidad", "config"].some((v) => c.ve(v)),
   trabajadores_escritura: (c) => c.ve("config"),
-  general: (c) => ["matriz", "programa", "capacitacion", "documentos", "config"].some((v) => c.ve(v)),
+  general: (c) => ["matriz", "programa", "capacitacion", "documentos", "accidentabilidad", "config"].some((v) => c.ve(v)),
   admin: (c) => c.esAdmin,
 };
 
