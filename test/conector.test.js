@@ -330,6 +330,41 @@ test("MIPER: actualizar exige versión, detecta conflictos y registra cada campo
   assert.match(r.texto, /Complete área, actividad, peligro y riesgo/);
 });
 
+test("MIPER: reasignar área por lotes (todo o nada, historial, auditoría, permisos)", async () => {
+  const ids = ["miper-1-andes", "miper-2-andes"];
+  const antes = await Promise.all(ids.map((id) => registro("prueba-andes", "matriz", id)));
+  // un id inexistente: no cambia ninguna
+  let r = await H("prevencionista", "miper_reasignar_area", { area: "Oficina", ids: [...ids, "no-existe"] });
+  assert.match(r.texto, /No existe la línea no-existe/);
+  for (let i = 0; i < ids.length; i++) assert.equal((await registro("prueba-andes", "matriz", ids[i])).areaId, antes[i].areaId);
+  // área de otra empresa o inexistente
+  r = await H("prevencionista", "miper_reasignar_area", { area: "Bodega inventada", ids });
+  assert.match(r.texto, /No existe el área/);
+  // sin escritura autorizada
+  r = await H("lectura", "miper_reasignar_area", { area: "Oficina", ids });
+  assert.equal(r.error, true);
+  r = await H("prevencionista", "miper_reasignar_area", { area: "Oficina", ids });
+  assert.equal(r.error, false, r.texto);
+  assert.equal(r.datos.movidas, 2);
+  const oficina = r.datos.area.id;
+  for (let i = 0; i < ids.length; i++) {
+    const d = await registro("prueba-andes", "matriz", ids[i]);
+    assert.equal(d.areaId, oficina);
+    assert.equal(d.peligro, antes[i].peligro); // el resto queda igual
+  }
+  const aud = await auditoria("herramienta='miper_reasignar_area' AND store='matriz'");
+  assert.equal(aud.length, 2);
+  assert.deepEqual(aud[0].campos_cambiados, ["areaId"]);
+  const { rows } = await pool.query("SELECT data FROM records WHERE company_id='prueba-andes' AND store='matrizHistorial' AND data->>'registroId'=$1 AND data->>'campo'='Área'", [ids[0]]);
+  assert.ok(rows.length >= 1);
+  // repetir: ya están en esa área, se omiten
+  r = await H("prevencionista", "miper_reasignar_area", { area_id: oficina, ids });
+  assert.equal(r.datos.movidas, 0);
+  assert.equal(r.datos.yaEstabanEnEsaArea, 2);
+  // devolverlas a su área original para no afectar otras pruebas
+  for (let i = 0; i < ids.length; i++) await H("prevencionista", "miper_reasignar_area", { area_id: antes[i].areaId, ids: [ids[i]] });
+});
+
 test("Plan de acción: crear (riesgo Medio o más), grupo, estado y cumplimiento con reevaluación del residual", async () => {
   let r = await H("prevencionista", "plan_accion_crear", { matriz_id: "miper-1-sur", actividad: "x", responsable: "y", plazo: "2026-12-01" });
   assert.equal(r.error, true);

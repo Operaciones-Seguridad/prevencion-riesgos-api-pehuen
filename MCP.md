@@ -61,7 +61,7 @@ Ninguna herramienta elimina. Todas declaran `destructiveHint: false`, así que c
   - `miper_riesgos_criticos`, `miper_resumen`
   - `plan_accion_listar`
 - Escritura:
-  - `miper_crear_linea`, `miper_actualizar_linea`
+  - `miper_crear_linea`, `miper_actualizar_linea`, `miper_reasignar_area` (cambia el área de hasta 300 líneas en una operación, todo o nada)
   - `plan_accion_crear`, `plan_accion_actualizar`, `plan_accion_cambiar_estado`, `plan_accion_marcar_cumplida`
   - `miper_aceptar_riesgo_medio`, `miper_revocar_aceptacion`: además exigen el permiso «puede aceptar riesgos» del perfil
 
