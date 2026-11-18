@@ -15,6 +15,14 @@ const TODAS_LAS_VISTAS = ["dashboard", "diagnostico", "objetivos", "realizar-ins
 // si la variable no existe o está vacía, ninguna empresa puede conectarse,
 // para que publicar el conector nunca lo abra a todos los clientes por error.
 function normEmpresa(s) { return String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim().replace(/\s+/g, " "); }
+// Alias de URL de una empresa: su nombre sin tildes, en minúsculas y con
+// guiones ("Transportes Pola Ltda" → "transportes-pola-ltda").
+function slugEmpresa(nombre) {
+  return String(nombre || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+function empresaCalzaAlias(empresa, alias) {
+  return !!(empresa && alias && (String(empresa.id).toLowerCase() === alias || slugEmpresa(empresa.nombre) === alias));
+}
 function empresaHabilitada(empresa) {
   if (!empresa) return false;
   const lista = String(process.env.MCP_EMPRESAS_PERMITIDAS || "").split(",").map(normEmpresa).filter(Boolean);
@@ -72,4 +80,4 @@ const PERMISOS = {
   admin: (c) => c.esAdmin,
 };
 
-module.exports = { construirContexto, PERMISOS, TODAS_LAS_VISTAS, empresaHabilitada };
+module.exports = { construirContexto, PERMISOS, TODAS_LAS_VISTAS, empresaHabilitada, slugEmpresa, empresaCalzaAlias };

@@ -10,6 +10,16 @@ Programa de seguridad, Capacitación, Control documental y Trabajadores.
 Fase 2: Accidentabilidad (accidentes, incidentes, investigación formal,
 árbol de causas e investigación de accidentes de tránsito, con fotos).
 
+**URL por empresa:** además de la URL general `/mcp` (que pide elegir la
+empresa al conectar), cada empresa tiene su URL directa `/mcp/<alias>`, donde
+el alias es su nombre sin tildes, en minúsculas y con guiones (por ejemplo
+`/mcp/transportes-pola-ltda`) o su id. Así se puede agregar un conector por
+empresa en claude.ai (que no admite dos conectores con la misma URL). Una
+conexión hecha por una URL directa solo puede quedar en esa empresa y su token
+no sirve en otra URL. Para no revelar qué empresas existen, un alias
+desconocido se comporta igual que uno válido hasta verificar la clave.
+`conexion_actual` muestra la URL directa de la empresa conectada.
+
 **Empresas habilitadas:** solo las de la variable `MCP_EMPRESAS_PERMITIDAS`
 (ids o nombres separados por coma, o `*` para todas). Si no existe, ninguna
 empresa puede conectarse: así publicar el conector nunca lo abre a todos los
@@ -128,7 +138,7 @@ La tabla está fuera de `records`, así que ninguna ruta de la app puede leerla 
 
 ## Pruebas
 ```bash
-npm test                     # 60 pruebas (unitarias + integración OAuth/MCP/permisos/módulos/auditoría)
+npm test                     # 65 pruebas (unitarias + integración OAuth/MCP/permisos/módulos/auditoría)
 node scripts/paridad-app.js ../prevencion-riesgos-app-pehuen/index.html [foto.jpg]   # paridad con la app real (Playwright)
 ```
 - **Base de datos:** las pruebas usan una base PostgreSQL **local** desechable (`postgres://pehuen_test:pehuen_test@localhost/pehuen_test`, o la de `TEST_DATABASE_URL`) que **se borra entera** en cada corrida. Por eso se niegan a correr si el servidor no es `localhost` o si el nombre de la base no contiene «test».

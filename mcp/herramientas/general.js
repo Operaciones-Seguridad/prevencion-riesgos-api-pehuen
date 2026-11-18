@@ -28,7 +28,9 @@ module.exports = function herramientasGenerales(datos, pool) {
             { modulo: "Trabajadores (crear y actualizar)", acceso: PERMISOS.trabajadores_escritura(ctx) },
             { modulo: "Auditoría del conector", acceso: ctx.esAdmin },
           ]),
-          paraCambiarDeEmpresa: "Desconecta y vuelve a conectar el conector en claude.ai eligiendo otra empresa, o agrega un conector por empresa.",
+          urlDeEsteConector: ctx.urlConector,
+          urlDirectaDeEstaEmpresa: ctx.urlDirectaEmpresa,
+          paraCambiarDeEmpresa: "Cada conexión queda ligada a una sola empresa. Para tener un conector por empresa en claude.ai, agrega uno por cada una con su URL directa (…/mcp/<nombre-de-la-empresa>); la URL general …/mcp pide elegir la empresa al conectar.",
         };
       },
     }),

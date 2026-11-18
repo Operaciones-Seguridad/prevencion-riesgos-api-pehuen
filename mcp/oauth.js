@@ -13,7 +13,13 @@
 const crypto = require("crypto");
 const { sha256, tokenAleatorio } = require("./util");
 const paginas = require("./paginas");
-const { empresaHabilitada } = require("./contexto");
+const { empresaHabilitada, empresaCalzaAlias } = require("./contexto");
+
+// URL del conector: /mcp (elige empresa al conectar) o /mcp/<alias>
+// (ligada a una sola empresa). El alias solo se valida contra la base
+// DESPUÉS de verificar la clave, para que nadie sin sesión pueda averiguar
+// qué empresas existen en la plataforma.
+const ALIAS_RE = /^[a-z0-9-]{1,80}$/;
 
 const ALCANCES = ["lectura", "escritura"];
 const TTL_ACCESO_S = 3600;
@@ -63,16 +69,23 @@ function crearOAuth(deps) {
     const proto = (req.headers["x-forwarded-proto"] || "http").split(",")[0].trim();
     return `${proto}://${req.headers.host}`;
   }
-  function recursoUrl(req) { return baseUrl(req) + "/mcp"; }
-  function recursoCoincide(req, resource) {
-    if (!resource) return true;
-    const norm = (u) => String(u).replace(/\/+$/, "");
-    return norm(resource) === norm(recursoUrl(req));
+  function recursoUrl(req, alias) { return baseUrl(req) + "/mcp" + (alias ? "/" + alias : ""); }
+  // Interpreta el parámetro "resource": {ok, alias}. Sin resource = /mcp.
+  function aliasDeRecurso(req, resource) {
+    if (!resource) return { ok: true, alias: null };
+    const r = String(resource).replace(/\/+$/, ""), base = recursoUrl(req);
+    if (r === base) return { ok: true, alias: null };
+    if (r.startsWith(base + "/")) {
+      const alias = r.slice(base.length + 1).toLowerCase();
+      if (ALIAS_RE.test(alias)) return { ok: true, alias };
+    }
+    return { ok: false };
   }
+  function mismoRecurso(a, b) { return String(a || "").replace(/\/+$/, "").toLowerCase() === String(b || "").replace(/\/+$/, "").toLowerCase(); }
 
-  function metadatosRecurso(req) {
+  function metadatosRecurso(req, alias) {
     return {
-      resource: recursoUrl(req),
+      resource: recursoUrl(req, alias),
       authorization_servers: [baseUrl(req)],
       scopes_supported: ALCANCES,
       bearer_methods_supported: ["header"],
@@ -148,11 +161,12 @@ function crearOAuth(deps) {
     const redirigirError = (error, desc) => ({ redirect: conParams(q.redirect_uri, { error, error_description: desc, state: q.state, iss: baseUrl(req) }) });
     if (q.response_type !== "code") return redirigirError("unsupported_response_type", "Solo se admite response_type=code.");
     if (!q.code_challenge || q.code_challenge_method !== "S256") return redirigirError("invalid_request", "PKCE con S256 es obligatorio.");
-    if (!recursoCoincide(req, q.resource)) return redirigirError("invalid_target", "El recurso solicitado no corresponde a este servidor.");
+    const rec = aliasDeRecurso(req, q.resource);
+    if (!rec.ok) return redirigirError("invalid_target", "El recurso solicitado no corresponde a este servidor.");
     const pedidos = String(q.scope || ALCANCES.join(" ")).split(/\s+/).filter(Boolean);
     const desconocidos = pedidos.filter((s) => !ALCANCES.includes(s));
     if (desconocidos.length) return redirigirError("invalid_scope", `Alcance desconocido: ${desconocidos.join(", ")}`);
-    return { cliente: c, pideEscritura: pedidos.includes("escritura") };
+    return { cliente: c, pideEscritura: pedidos.includes("escritura"), alias: rec.alias };
   }
   function paramsSolicitud(q) {
     const out = {};
@@ -198,7 +212,7 @@ function crearOAuth(deps) {
       if (bloqueado("ip:" + ip, MAX_FALLOS_IP, VENTANA_LOGIN_MS) || bloqueado("correo:" + email, MAX_FALLOS_CORREO, VENTANA_LOGIN_MS)) {
         return html(res, 429, paginas.paginaLogin({ params, clienteNombre, pideEscritura: v.pideEscritura, error: "Demasiados intentos fallidos. Espera unos minutos e inténtalo de nuevo." }));
       }
-      const r = await validarCredenciales(email, q.clave || "");
+      const r = await validarCredenciales(email, q.clave || "", v.alias);
       if (r.error) {
         anotarFallo("ip:" + ip, VENTANA_LOGIN_MS); anotarFallo("correo:" + email, VENTANA_LOGIN_MS);
         return html(res, 401, paginas.paginaLogin({ params, clienteNombre, pideEscritura: v.pideEscritura, email, error: r.error }));
@@ -220,20 +234,33 @@ function crearOAuth(deps) {
   }
 
   // Mismas reglas que POST /api/auth/login con {email, clave}.
-  async function validarCredenciales(email, clave) {
+  async function validarCredenciales(email, clave, alias) {
     const MSG = "Correo o clave incorrectos.";
     if (!email || !clave) return { error: MSG };
     const candidatos = await dbFindUsuariosPorEmail(email);
     const ok = candidatos.filter((c) => c.data.activo !== false && verifyPassword(clave, c.data.claveHash));
     if (!ok.length) return { error: MSG };
     const opciones = [];
+    const opcionesTodas = new Map(); // empresas activas y aprobadas del usuario
     let pendiente = false, noHabilitada = false;
     for (const c of ok) {
       const e = await dbGetEmpresa(c.companyId);
       if (!e || e.activo === false) continue;
+      if (e.aprobada !== false) opcionesTodas.set(c.companyId, e);
       if (e.aprobada === false) { pendiente = true; continue; }
       if (!empresaHabilitada(e)) { noHabilitada = true; continue; }
       opciones.push({ companyId: c.companyId, usuarioId: c.data.id, empresaNombre: e.nombre });
+    }
+    if (alias) {
+      // Conector de una empresa específica: solo esa. Si el usuario no tiene
+      // acceso (o el alias no existe), el mismo mensaje, sin revelar nada más.
+      const fija = ok.find((c) => opcionesTodas.has(c.companyId) && empresaCalzaAlias(opcionesTodas.get(c.companyId), alias));
+      const enLista = opciones.filter((o) => fija && o.companyId === fija.companyId);
+      if (!enLista.length) {
+        if (fija && !empresaHabilitada(opcionesTodas.get(fija.companyId))) return { error: "Tu empresa todavía no tiene habilitada la conexión con Claude. Pide al administrador de la plataforma que la habilite." };
+        return { error: "Tu usuario no tiene acceso a la empresa de este conector. Revisa la dirección del conector o usa la dirección general /mcp." };
+      }
+      return { opciones: enLista };
     }
     if (!opciones.length) {
       // La clave ya se validó: informar el motivo real no expone datos ajenos.
@@ -267,7 +294,7 @@ function crearOAuth(deps) {
       if (verif.length < 43 || verif.length > 128 || crypto.createHash("sha256").update(verif).digest("base64url") !== cod.code_challenge) {
         return [400, { error: "invalid_grant", error_description: "PKCE: code_verifier no válido." }];
       }
-      if (body.resource && !recursoCoincide(req, body.resource)) return [400, { error: "invalid_target" }];
+      if (body.resource && !mismoRecurso(body.resource, cod.resource || recursoUrl(req))) return [400, { error: "invalid_target" }];
       const marcado = await pool.query("UPDATE oauth_codigos SET usado_at = now() WHERE codigo_hash = $1 AND usado_at IS NULL", [cod.codigo_hash]);
       if (!marcado.rowCount) return [400, { error: "invalid_grant", error_description: "El código ya fue usado." }];
       if (!(await usuarioSigueHabilitado(cod.company_id, cod.usuario_id))) return [400, { error: "invalid_grant", error_description: "El usuario o la empresa ya no están habilitados." }];
@@ -332,8 +359,9 @@ function crearOAuth(deps) {
     return [200, {}]; // RFC 7009: siempre 200, exista o no el token
   }
 
-  // Verifica un token de acceso de /mcp. Devuelve la fila o null.
-  async function verificarAcceso(req, token) {
+  // Verifica un token de acceso para la URL pedida (/mcp o /mcp/<alias>).
+  // El token queda amarrado a la URL con que se autorizó.
+  async function verificarAcceso(req, token, alias) {
     if (!token) return null;
     const { rows } = await pool.query(
       "SELECT * FROM oauth_tokens WHERE token_hash = $1 AND tipo = 'acceso' AND revocado_at IS NULL AND expira_at > now()",
@@ -341,12 +369,12 @@ function crearOAuth(deps) {
     );
     const t = rows[0];
     if (!t) return null;
-    if (t.resource && !recursoCoincide(req, t.resource)) return null;
+    if (t.resource ? !mismoRecurso(t.resource, recursoUrl(req, alias)) : !!alias) return null;
     return t;
   }
 
   return {
-    ALCANCES, baseUrl, recursoUrl, metadatosRecurso, metadatosServidor, registrar,
+    ALCANCES, ALIAS_RE, baseUrl, recursoUrl, metadatosRecurso, metadatosServidor, registrar,
     manejarAuthorize, manejarToken, manejarRevocar, verificarAcceso, usuarioSigueHabilitado,
   };
 }
