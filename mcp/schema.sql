@@ -66,10 +66,18 @@ CREATE TABLE IF NOT EXISTS auditoria_escrituras (
   herramienta TEXT NOT NULL,
   store TEXT NOT NULL,
   registro_id TEXT NOT NULL,
-  operacion TEXT NOT NULL CHECK (operacion IN ('crear', 'actualizar')),
+  operacion TEXT NOT NULL CHECK (operacion IN ('crear', 'actualizar', 'eliminar', 'restaurar')),
   valor_anterior JSONB,
   valor_nuevo JSONB NOT NULL,
   campos_cambiados JSONB NOT NULL DEFAULT '[]'::jsonb
 );
+-- Bases creadas antes de existir la eliminación: ampliar las operaciones permitidas.
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'auditoria_escrituras_operacion_check'
+                 AND pg_get_constraintdef(oid) LIKE '%eliminar%') THEN
+    ALTER TABLE auditoria_escrituras DROP CONSTRAINT IF EXISTS auditoria_escrituras_operacion_check;
+    ALTER TABLE auditoria_escrituras ADD CONSTRAINT auditoria_escrituras_operacion_check CHECK (operacion IN ('crear', 'actualizar', 'eliminar', 'restaurar'));
+  END IF;
+END $$;
 CREATE INDEX IF NOT EXISTS auditoria_empresa_momento_idx ON auditoria_escrituras (company_id, momento DESC);
 CREATE INDEX IF NOT EXISTS auditoria_registro_idx ON auditoria_escrituras (company_id, store, registro_id);

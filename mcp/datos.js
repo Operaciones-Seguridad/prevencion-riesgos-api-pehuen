@@ -1,7 +1,8 @@
 "use strict";
 // Acceso a datos del conector: lecturas con su versión (updated_at) y
 // escrituras dentro de una transacción que SIEMPRE deja su fila en
-// auditoria_escrituras. No existe ninguna función de borrado.
+// auditoria_escrituras. El único borrado (tx.eliminar) guarda el registro
+// completo en la auditoría para poder restaurarlo.
 
 const { omitirAdjuntos, fallar } = require("./util");
 
@@ -57,7 +58,7 @@ function crearDatos(pool) {
             fallar("El registro fue modificado por otra persona después de que lo leíste. Vuelve a leerlo (herramienta de detalle) y repite el cambio sobre la versión actual.", { version_actual: registro._version, version_esperada: versionEsperada });
           }
         },
-        async guardar(store, nuevo, anterior) {
+        async guardar(store, nuevo, anterior, operacion) {
           const limpio = sinVersion(nuevo);
           if (!limpio.id) throw new Error("registro sin id");
           const { rows } = await cliente.query(
@@ -72,7 +73,7 @@ function crearDatos(pool) {
               (company_id, usuario_id, usuario_nombre, origen, client_id, herramienta, store, registro_id, operacion, valor_anterior, valor_nuevo, campos_cambiados)
              VALUES ($1,$2,$3,'mcp',$4,$5,$6,$7,$8,$9,$10,$11)`,
             [ctx.companyId, ctx.usuario.id, ctx.usuario.nombre || "", ctx.clientId || null, herramienta, store, String(limpio.id),
-              ant ? "actualizar" : "crear",
+              operacion || (ant ? "actualizar" : "crear"),
               ant ? JSON.stringify(omitirAdjuntos(ant, "auditoria")) : null,
               JSON.stringify(omitirAdjuntos(limpio, "auditoria")),
               JSON.stringify(camposCambiados(ant, limpio))]
@@ -80,6 +81,20 @@ function crearDatos(pool) {
           const guardado = conVersion(limpio, rows[0].updated_at);
           escritos.push({ store, id: limpio.id });
           return guardado;
+        },
+        // Elimina un registro ya leído con leerBloqueando. El registro completo
+        // queda en valor_anterior de la auditoría (de ahí se puede restaurar).
+        async eliminar(store, anterior, motivo) {
+          const ant = sinVersion(anterior);
+          await cliente.query("DELETE FROM records WHERE company_id = $1 AND store = $2 AND id = $3", [ctx.companyId, store, String(ant.id)]);
+          await cliente.query(
+            `INSERT INTO auditoria_escrituras
+              (company_id, usuario_id, usuario_nombre, origen, client_id, herramienta, store, registro_id, operacion, valor_anterior, valor_nuevo, campos_cambiados)
+             VALUES ($1,$2,$3,'mcp',$4,$5,$6,$7,'eliminar',$8,$9,'[]'::jsonb)`,
+            [ctx.companyId, ctx.usuario.id, ctx.usuario.nombre || "", ctx.clientId || null, herramienta, store, String(ant.id),
+              JSON.stringify(ant), JSON.stringify({ eliminado: true, motivo: motivo || "" })]
+          );
+          escritos.push({ store, id: ant.id });
         },
         async agregarCatalogoRubro(rubroNorm, tipo, valor) {
           await cliente.query("INSERT INTO catalogos_rubro (rubro_norm, tipo, valor) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING", [rubroNorm, tipo, valor]);
@@ -96,7 +111,16 @@ function crearDatos(pool) {
     }
   }
 
-  return { leerTodos, leerUno, leerStores, catalogoRubro, transaccion };
+  // Última eliminación hecha por el conector de un registro (para restaurarlo).
+  async function ultimaEliminacion(companyId, store, id) {
+    const { rows } = await pool.query(
+      `SELECT momento, usuario_nombre, valor_anterior, valor_nuevo FROM auditoria_escrituras
+       WHERE company_id = $1 AND store = $2 AND registro_id = $3 AND operacion = 'eliminar' ORDER BY id DESC LIMIT 1`,
+      [companyId, store, String(id)]);
+    return rows[0] || null;
+  }
+
+  return { leerTodos, leerUno, leerStores, catalogoRubro, transaccion, ultimaEliminacion };
 }
 
 function conVersion(data, updatedAt) {
