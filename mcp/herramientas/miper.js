@@ -320,6 +320,36 @@ module.exports = function herramientasMiper(datos) {
     }),
 
     herramienta({
+      name: "miper_reasignar_area", title: "MIPER: cambiar el área de varias líneas", permiso, escritura: true,
+      description: "Mueve hasta 300 líneas de la matriz a un área, en una sola operación (solo cambia el área; el resto de la línea queda igual). Registra el cambio de área en el historial de cada línea y en la auditoría. Las líneas que ya están en esa área se omiten. Si algún id no existe, no se cambia ninguna.",
+      inputSchema: { required: ["ids"], properties: Object.assign({}, esquemaArea, {
+        ids: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1, maxItems: 300, description: "Ids de las líneas (ver miper_listar)." },
+      }) },
+      async run(ctx, a) {
+        const area = await resolverArea(datos, ctx, a, true);
+        const ids = [...new Set(a.ids)];
+        const { resultado } = await datos.transaccion(ctx, "miper_reasignar_area", async (tx) => {
+          const anteriores = [];
+          for (const id of ids) {
+            const anterior = await tx.leerBloqueando("matriz", id);
+            if (!anterior) fallar(`No existe la línea ${id} en la matriz; no se cambió ninguna.`);
+            anteriores.push(anterior);
+          }
+          let movidas = 0;
+          for (const anterior of anteriores) {
+            if (anterior.areaId === area.id) continue;
+            const rec = Object.assign({}, anterior, { areaId: area.id });
+            await tx.guardar("matriz", rec, anterior);
+            await tx.guardar("matrizHistorial", historialItem(rec.id, D.matrizLineLabel(rec), "Área", anterior.areaId, area.id), null);
+            movidas++;
+          }
+          return { movidas, omitidas: anteriores.length - movidas };
+        });
+        return { mensaje: `${resultado.movidas} línea(s) movidas al área «${area.nombre}».`, movidas: resultado.movidas, yaEstabanEnEsaArea: resultado.omitidas, area: { id: area.id, nombre: area.nombre } };
+      },
+    }),
+
+    herramienta({
       name: "plan_accion_crear", title: "Plan de acción: crear acción", permiso, escritura: true,
       description: "Crea una acción del Plan de acción para una línea de riesgo Medio o superior (y opcionalmente para otras líneas, con un grupo compartido; cada línea conserva su propio seguimiento). Actividad, responsable y plazo son obligatorios.",
       inputSchema: { required: ["matriz_id", "actividad", "responsable", "plazo"], properties: {
