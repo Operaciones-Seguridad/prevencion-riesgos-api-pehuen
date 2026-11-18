@@ -35,11 +35,12 @@ clientes por error. Quitar una empresa corta de inmediato sus conexiones.
   - Las tablas del conector se crean aparte, en `mcp/schema.sql`, protegidas con `try/catch`: si algo fallara al crearlas, la API arranca igual, solo que sin conector.
 - **Tokens propios:** los tokens del conector son distintos de los de sesión de la app y no sirven para `/api`, ni al revés.
 
-## Herramientas (58)
+## Herramientas (59)
 
 Ninguna herramienta elimina. Todas declaran `destructiveHint: false`, así que claude.ai pide confirmación antes de cada escritura.
 
 **Generales**
+- `conexion_actual`: empresa, usuario, perfil, permisos y módulos de la conexión. Cada conexión queda ligada a una sola empresa; además, cada escritura indica en qué empresa se guardó y las instrucciones iniciales del servidor le dicen a Claude con qué empresa está conectado.
 - `listar_areas`
 - `buscar`
 - `auditoria_listar` (solo Administrador)
@@ -127,7 +128,7 @@ La tabla está fuera de `records`, así que ninguna ruta de la app puede leerla 
 
 ## Pruebas
 ```bash
-npm test                     # 59 pruebas (unitarias + integración OAuth/MCP/permisos/módulos/auditoría)
+npm test                     # 60 pruebas (unitarias + integración OAuth/MCP/permisos/módulos/auditoría)
 node scripts/paridad-app.js ../prevencion-riesgos-app-pehuen/index.html [foto.jpg]   # paridad con la app real (Playwright)
 ```
 - **Base de datos:** las pruebas usan una base PostgreSQL **local** desechable (`postgres://pehuen_test:pehuen_test@localhost/pehuen_test`, o la de `TEST_DATABASE_URL`) que **se borra entera** en cada corrida. Por eso se niegan a correr si el servidor no es `localhost` o si el nombre de la base no contiene «test».

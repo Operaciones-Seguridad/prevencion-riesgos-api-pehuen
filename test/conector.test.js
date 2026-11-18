@@ -171,6 +171,24 @@ test("MCP: initialize, notificaciones, ping, errores de protocolo y origen", asy
   assert.equal((await A.rpc(base, t, "tools/call", { name: "no_existe", arguments: {} })).body.error.code, -32602);
 });
 
+test("Conexión actual: empresa, usuario y perfil; las escrituras dicen dónde se guardaron", async () => {
+  const c = await H("supervisor", "conexion_actual", {});
+  assert.equal(c.datos.empresa.nombre, "Constructora Ficticia Andes SpA (PRUEBA)");
+  assert.equal(c.datos.usuario.nombre, "Sergio Supervisor Inventado");
+  assert.equal(c.datos.perfil.nombre, "Jefe de Obra / Supervisor");
+  assert.equal(c.datos.permisos.escritura, true);
+  assert.equal(c.datos.modulos.find((m) => m.modulo === "Control documental").acceso, false);
+  const sur = await H("sur", "conexion_actual", {});
+  assert.equal(sur.datos.empresa.id, "prueba-sur");
+  const ini = await A.rpc(base, tokens.lectura, "initialize", { protocolVersion: "2025-06-18" });
+  assert.match(ini.body.result.instructions, /^Conectado a la empresa «Constructora Ficticia Andes SpA \(PRUEBA\)» como Pía Prevención Ficticia \(perfil Prevencionista de Riesgos\), solo lectura\./);
+  const w = await H("admin", "trabajador_crear", { nombre: "Prueba Empresa En Respuesta", area: "Oficina" });
+  assert.equal(w.datos.empresa, "Constructora Ficticia Andes SpA (PRUEBA)");
+  assert.match(w.datos.mensaje, /\(Empresa: Constructora Ficticia Andes SpA \(PRUEBA\)\)$/);
+  const l = await H("admin", "listar_areas", {});
+  assert.ok(Array.isArray(l.datos), "las lecturas no cambian de forma");
+});
+
 test("MCP: ninguna herramienta elimina y todas declaran destructiveHint=false", async () => {
   const { tools } = (await A.rpc(base, tokens.admin, "tools/list", {})).body.result;
   assert.ok(tools.length >= 40);
@@ -194,7 +212,7 @@ test("Permisos: cada perfil ve solo los módulos de su perfil en la app", async 
   assert.ok(sup.has("miper_crear_linea") && sup.has("programa_avance") && sup.has("capacitaciones_listar"));
   assert.ok(!sup.has("documentos_listar"), "supervisor no ve Control documental");
   assert.ok(!sup.has("miper_aceptar_riesgo_medio"), "supervisor no acepta riesgos");
-  assert.equal((await nombres("trabajador")).size, 0, "perfil Trabajador: ningún módulo del conector");
+  assert.deepEqual([...(await nombres("trabajador"))], ["conexion_actual"], "perfil Trabajador: solo puede ver con qué empresa está conectado");
   const cap = await nombres("capacitacion");
   assert.ok(cap.has("capacitaciones_por_vencer") && cap.has("trabajadores_listar") && cap.has("buscar"));
   assert.ok(!cap.has("miper_listar") && !cap.has("programa_listar"));

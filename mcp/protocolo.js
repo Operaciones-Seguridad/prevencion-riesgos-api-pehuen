@@ -14,7 +14,14 @@ const INSTRUCCIONES = [
   "Para actualizar un registro, primero léelo con su herramienta de detalle y envía su _version en version_esperada: así no se pisan cambios hechos por otra persona.",
   "El conector puede crear y actualizar, pero nunca eliminar. Cada escritura queda auditada.",
   "Las fechas van en formato AAAA-MM-DD (hora de Chile).",
+  "Cada conexión queda ligada a una sola empresa: confírmala con conexion_actual antes de escribir y menciónala al usuario cuando confirmes un cambio.",
 ].join(" ");
+// Instrucciones con la empresa de esta conexión, para que Claude la tenga
+// presente desde el inicio de la conversación.
+function instruccionesPara(ctx) {
+  return `Conectado a la empresa «${ctx.empresa.nombre}» como ${ctx.usuario.nombre || ctx.usuario.email || "usuario"}` +
+    `${ctx.perfil ? ` (perfil ${ctx.perfil.nombre})` : ""}${ctx.puedeEscribir ? "" : ", solo lectura"}. ` + INSTRUCCIONES;
+}
 
 function crearProtocolo(herramientas) {
   const porNombre = new Map(herramientas.map((h) => [h.name, h]));
@@ -47,7 +54,12 @@ function crearProtocolo(herramientas) {
     const errores = validarEsquema(h.inputSchema, argumentos);
     if (errores.length) return resultadoError("Argumentos no válidos:\n- " + errores.join("\n- "));
     try {
-      const salida = await h.run(ctx, argumentos);
+      let salida = await h.run(ctx, argumentos);
+      // Toda escritura indica en qué empresa quedó guardada.
+      if (h.escritura && salida && typeof salida === "object" && !Array.isArray(salida)) {
+        salida = Object.assign({ empresa: ctx.empresa.nombre }, salida);
+        if (typeof salida.mensaje === "string") salida.mensaje = `${salida.mensaje} (Empresa: ${ctx.empresa.nombre})`;
+      }
       return { result: { content: [{ type: "text", text: JSON.stringify(omitirAdjuntos(salida), null, 1) }] } };
     } catch (err) {
       if (err instanceof ErrorHerramienta) return resultadoError(err.message + (err.detalle ? "\n" + JSON.stringify(err.detalle) : ""));
@@ -73,7 +85,7 @@ function crearProtocolo(herramientas) {
           protocolVersion: VERSIONES.includes(pedida) ? pedida : VERSIONES[0],
           capabilities: { tools: { listChanged: false } },
           serverInfo: INFO_SERVIDOR,
-          instructions: INSTRUCCIONES,
+          instructions: instruccionesPara(ctx),
         })];
       }
       case "ping": return [200, ok(id, {})];

@@ -6,8 +6,32 @@ const M = require("../dominio/miper");
 const { contieneTexto, mapaPorId, herramienta } = require("./comun");
 const { PERMISOS } = require("../contexto");
 
+// Módulos del conector y la vista de la app que exige cada uno.
+const MODULOS = [
+  ["MIPER y Plan de acción", "matriz"], ["Programa de seguridad", "programa"], ["Capacitación", "capacitacion"],
+  ["Control documental", "documentos"], ["Accidentabilidad y DS 67", "accidentabilidad"],
+];
+
 module.exports = function herramientasGenerales(datos, pool) {
   return [
+    herramienta({
+      name: "conexion_actual", title: "¿Con qué empresa estoy conectado?", permiso: () => true,
+      description: "Empresa, usuario y perfil de esta conexión, si se autorizó escritura y qué módulos puede usar. Úsala antes de escribir para confirmar la empresa: cada conexión queda ligada a una sola.",
+      async run(ctx) {
+        return {
+          empresa: ctx.empresa,
+          usuario: { nombre: ctx.usuario.nombre, email: ctx.usuario.email, cargo: ctx.usuario.cargo },
+          perfil: ctx.perfil ? { nombre: ctx.perfil.nombre, administrador: ctx.esAdmin } : null,
+          permisos: { lectura: true, escritura: ctx.puedeEscribir, aceptarRiesgosMedio: ctx.puedeAceptarRiesgos },
+          modulos: MODULOS.map(([nombre, vista]) => ({ modulo: nombre, acceso: ctx.ve(vista) })).concat([
+            { modulo: "Trabajadores (lectura)", acceso: PERMISOS.trabajadores_lectura(ctx) },
+            { modulo: "Trabajadores (crear y actualizar)", acceso: PERMISOS.trabajadores_escritura(ctx) },
+            { modulo: "Auditoría del conector", acceso: ctx.esAdmin },
+          ]),
+          paraCambiarDeEmpresa: "Desconecta y vuelve a conectar el conector en claude.ai eligiendo otra empresa, o agrega un conector por empresa.",
+        };
+      },
+    }),
     herramienta({
       name: "buscar", title: "Buscar en todos los módulos", permiso: PERMISOS.general,
       description: "Busca un texto en MIPER, Plan de acción, Programa de seguridad, Capacitación, Control documental y Trabajadores (solo en los módulos que tu perfil puede ver). Devuelve hasta 10 coincidencias por módulo, con su id para pedir el detalle.",
