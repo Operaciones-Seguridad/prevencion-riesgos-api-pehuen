@@ -398,6 +398,36 @@ module.exports = function herramientasMiper(datos) {
     }),
 
     herramienta({
+      name: "miper_reabrir_traspasos", title: "MIPER: volver a dejar pendientes los traspasos descartados", escritura: true,
+      permiso: (c) => permiso(c) && c.esAdmin,
+      description: "Quita la marca «descartado» de las medidas de control que se descartaron en «Traspasos pendientes desde la Matriz», para que vuelvan a aparecer como pendientes en la app. No toca las ya traspasadas a Programa o Capacitación. Sin ids, revisa toda la matriz; con desde (AAAA-MM-DD) solo líneas modificadas desde esa fecha. Solo perfiles Administrador.",
+      inputSchema: { properties: {
+        ids: { type: "array", items: { type: "string", minLength: 1 }, maxItems: 500, description: "Ids de líneas; si se omite, todas." },
+        desde: { type: "string", format: "date", description: "Solo líneas modificadas desde esta fecha (hora de Chile)." },
+        simular: { type: "boolean", description: "true: solo cuenta lo que se reabriría, sin guardar." },
+      } },
+      async run(ctx, a) {
+        const todas = await datos.leerTodos(ctx.companyId, "matriz");
+        const desde = a.desde ? new Date(a.desde + "T00:00:00-03:00").getTime() : 0;
+        const objetivo = todas.filter((m) => (!a.ids || a.ids.includes(m.id)) && new Date(m._version).getTime() >= desde
+          && Object.values(m.controlesTraspasos || {}).some((t) => t && t.estado === "descartado"));
+        const detalle = objetivo.map((m) => ({ id: m.id, linea: D.matrizLineLabel(m), medidas: Object.entries(m.controlesTraspasos).filter(([, t]) => t && t.estado === "descartado").map(([k]) => k.split("::").slice(1).join("::")) }));
+        const total = detalle.reduce((n, d) => n + d.medidas.length, 0);
+        if (a.simular || !objetivo.length) return { mensaje: `${total} medida(s) descartada(s) en ${objetivo.length} línea(s)${a.simular ? " (simulación, no se guardó nada)" : ""}.`, lineas: detalle };
+        await datos.transaccion(ctx, "miper_reabrir_traspasos", async (tx) => {
+          for (const m of objetivo) {
+            const anterior = await tx.leerBloqueando("matriz", m.id);
+            if (!anterior) continue;
+            const ct = Object.fromEntries(Object.entries(anterior.controlesTraspasos || {}).filter(([, t]) => !(t && t.estado === "descartado")));
+            await tx.guardar("matriz", Object.assign({}, anterior, { controlesTraspasos: ct }), anterior);
+            await tx.guardar("matrizHistorial", historialItem(m.id, D.matrizLineLabel(anterior), "Traspasos descartados", "Descartados", "Vuelven a pendientes"), null);
+          }
+        });
+        return { mensaje: `${total} medida(s) de ${objetivo.length} línea(s) vuelven a «Traspasos pendientes» en la app.`, lineas: detalle };
+      },
+    }),
+
+    herramienta({
       name: "plan_accion_crear", title: "Plan de acción: crear acción", permiso, escritura: true,
       description: "Crea una acción del Plan de acción para una línea de riesgo Medio o superior (y opcionalmente para otras líneas, con un grupo compartido; cada línea conserva su propio seguimiento). Actividad, responsable y plazo son obligatorios.",
       inputSchema: { required: ["matriz_id", "actividad", "responsable", "plazo"], properties: {
