@@ -402,6 +402,22 @@ test("MIPER: eliminar líneas con respaldo y restaurarlas (solo administrador)",
   assert.match(r.texto, /ya está en la matriz/);
 });
 
+test("MIPER: reabrir traspasos descartados (sin tocar los traspasados)", async () => {
+  const id = "miper-3-andes";
+  const d = await registro("prueba-andes", "matriz", id);
+  d.controlesTraspasos = { "D::capacitar": { estado: "descartado" }, "D::inspeccionar": { estado: "traspasado", destino: "programa", destinoId: "x" } };
+  await pool.query("UPDATE records SET data=$1 WHERE company_id='prueba-andes' AND store='matriz' AND id=$2", [d, id]);
+  let r = await H("prevencionista", "miper_reabrir_traspasos", {});
+  assert.equal(r.error, true);
+  r = await H("admin", "miper_reabrir_traspasos", { simular: true });
+  assert.match(r.texto, /1 medida/);
+  assert.ok((await registro("prueba-andes", "matriz", id)).controlesTraspasos["D::capacitar"]);
+  r = await H("admin", "miper_reabrir_traspasos", {});
+  assert.equal(r.error, false, r.texto);
+  assert.deepEqual(Object.keys((await registro("prueba-andes", "matriz", id)).controlesTraspasos), ["D::inspeccionar"]);
+  assert.equal((await auditoria("herramienta='miper_reabrir_traspasos' AND store='matriz'")).length, 1);
+});
+
 test("Plan de acción: crear (riesgo Medio o más), grupo, estado y cumplimiento con reevaluación del residual", async () => {
   let r = await H("prevencionista", "plan_accion_crear", { matriz_id: "miper-1-sur", actividad: "x", responsable: "y", plazo: "2026-12-01" });
   assert.equal(r.error, true);
