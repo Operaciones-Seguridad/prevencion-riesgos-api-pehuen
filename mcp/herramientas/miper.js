@@ -350,6 +350,54 @@ module.exports = function herramientasMiper(datos) {
     }),
 
     herramienta({
+      name: "miper_eliminar_lineas", title: "MIPER: eliminar líneas (con respaldo)", escritura: true, destructiva: true,
+      permiso: (c) => permiso(c) && c.esAdmin,
+      description: "Elimina hasta 100 líneas de la matriz que el usuario decidió quitar (copias repetidas o peligros que no aplican). Solo perfiles Administrador. Exige un motivo. La línea completa queda guardada en la auditoría y se puede recuperar con miper_restaurar_linea. Si algún id no existe o alguna línea tiene acciones en el Plan de acción, no se elimina ninguna. Confirma con el usuario la lista exacta antes de llamarla.",
+      inputSchema: { required: ["ids", "motivo"], properties: {
+        ids: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1, maxItems: 100, description: "Ids de las líneas a eliminar (ver miper_listar)." },
+        motivo: { type: "string", minLength: 3, maxLength: 500, description: "Por qué se eliminan (p. ej. «Copia repetida» o «No aplica a la actividad»)." },
+      } },
+      async run(ctx, a) {
+        const ids = [...new Set(a.ids)];
+        const plan = await datos.leerTodos(ctx.companyId, "planAccionMatriz");
+        const conPlan = ids.filter((id) => plan.some((p) => p.matrizId === id));
+        if (conPlan.length) fallar("Estas líneas tienen acciones en el Plan de acción; resuélvelas o muévelas antes de eliminar. No se eliminó ninguna.", { lineas_con_plan: conPlan });
+        const { resultado } = await datos.transaccion(ctx, "miper_eliminar_lineas", async (tx) => {
+          const lineas = [];
+          for (const id of ids) {
+            const l = await tx.leerBloqueando("matriz", id);
+            if (!l) fallar(`No existe la línea ${id} en la matriz; no se eliminó ninguna.`);
+            lineas.push(l);
+          }
+          for (const l of lineas) {
+            await tx.eliminar("matriz", l, a.motivo);
+            await tx.guardar("matrizHistorial", historialItem(l.id, D.matrizLineLabel(l), "Línea eliminada", "", `${a.motivo} (desde Claude; recuperable)`), null);
+          }
+          return lineas.map((l) => ({ id: l.id, linea: D.matrizLineLabel(l) }));
+        });
+        return { mensaje: `${resultado.length} línea(s) eliminadas de la matriz. Se pueden recuperar con miper_restaurar_linea.`, eliminadas: resultado };
+      },
+    }),
+
+    herramienta({
+      name: "miper_restaurar_linea", title: "MIPER: restaurar una línea eliminada", escritura: true,
+      permiso: (c) => permiso(c) && c.esAdmin,
+      description: "Vuelve a poner en la matriz una línea eliminada con miper_eliminar_lineas, exactamente como estaba (mismo id), a partir del respaldo de la auditoría. Solo perfiles Administrador.",
+      inputSchema: { required: ["id"], properties: { id: { type: "string", minLength: 1 } } },
+      async run(ctx, a) {
+        const elim = await datos.ultimaEliminacion(ctx.companyId, "matriz", a.id);
+        if (!elim) fallar(`No hay una eliminación de la línea ${a.id} hecha con el conector en esta empresa.`);
+        const { resultado } = await datos.transaccion(ctx, "miper_restaurar_linea", async (tx) => {
+          if (await tx.leerBloqueando("matriz", a.id)) fallar(`La línea ${a.id} ya está en la matriz.`);
+          const g = await tx.guardar("matriz", elim.valor_anterior, null, "restaurar");
+          await tx.guardar("matrizHistorial", historialItem(a.id, D.matrizLineLabel(g), "Línea restaurada", "Eliminada", "Restaurada desde el respaldo"), null);
+          return g;
+        });
+        return { mensaje: "Línea restaurada en la matriz.", linea: D.matrizLineLabel(resultado), _version: resultado._version };
+      },
+    }),
+
+    herramienta({
       name: "plan_accion_crear", title: "Plan de acción: crear acción", permiso, escritura: true,
       description: "Crea una acción del Plan de acción para una línea de riesgo Medio o superior (y opcionalmente para otras líneas, con un grupo compartido; cada línea conserva su propio seguimiento). Actividad, responsable y plazo son obligatorios.",
       inputSchema: { required: ["matriz_id", "actividad", "responsable", "plazo"], properties: {

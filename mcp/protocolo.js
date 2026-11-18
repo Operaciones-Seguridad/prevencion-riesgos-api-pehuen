@@ -12,7 +12,7 @@ const INSTRUCCIONES = [
   "Todo queda limitado a la empresa y a los módulos que el perfil del usuario puede ver en la app.",
   "Los ids de área, trabajador, línea de matriz, etc. se obtienen con las herramientas de listado (p. ej. listar_areas).",
   "Para actualizar un registro, primero léelo con su herramienta de detalle y envía su _version en version_esperada: así no se pisan cambios hechos por otra persona.",
-  "El conector puede crear y actualizar, pero nunca eliminar. Cada escritura queda auditada.",
+  "El conector crea y actualiza; la única eliminación es miper_eliminar_lineas (solo Administrador, con motivo y respaldo restaurable con miper_restaurar_linea): confirma con el usuario la lista exacta antes de usarla. Cada escritura queda auditada.",
   "Las fechas van en formato AAAA-MM-DD (hora de Chile).",
   "Cada conexión queda ligada a una sola empresa: confírmala con conexion_actual antes de escribir y menciónala al usuario cuando confirmes un cambio.",
 ].join(" ");
@@ -38,7 +38,7 @@ function crearProtocolo(herramientas) {
       annotations: {
         title: h.title,
         readOnlyHint: !h.escritura,
-        destructiveHint: false, // ninguna herramienta elimina
+        destructiveHint: !!h.destructiva, // solo miper_eliminar_lineas (con respaldo para restaurar)
         idempotentHint: !h.escritura,
         openWorldHint: false,
       },

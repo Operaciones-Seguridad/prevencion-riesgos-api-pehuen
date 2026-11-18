@@ -189,12 +189,13 @@ test("Conexión actual: empresa, usuario y perfil; las escrituras dicen dónde s
   assert.ok(Array.isArray(l.datos), "las lecturas no cambian de forma");
 });
 
-test("MCP: ninguna herramienta elimina y todas declaran destructiveHint=false", async () => {
+test("MCP: solo miper_eliminar_lineas elimina (destructiveHint=true); las demás no", async () => {
   const { tools } = (await A.rpc(base, tokens.admin, "tools/list", {})).body.result;
   assert.ok(tools.length >= 40);
   for (const t of tools) {
-    assert.doesNotMatch(t.name, /elimin|borr|delete|remove|quitar/i);
-    assert.equal(t.annotations.destructiveHint, false);
+    const borra = t.name === "miper_eliminar_lineas";
+    if (!borra) assert.doesNotMatch(t.name, /elimin|borr|delete|remove|quitar/i);
+    assert.equal(t.annotations.destructiveHint, borra);
     assert.equal(t.inputSchema.type, "object");
   }
 });
@@ -363,6 +364,42 @@ test("MIPER: reasignar área por lotes (todo o nada, historial, auditoría, perm
   assert.equal(r.datos.yaEstabanEnEsaArea, 2);
   // devolverlas a su área original para no afectar otras pruebas
   for (let i = 0; i < ids.length; i++) await H("prevencionista", "miper_reasignar_area", { area_id: antes[i].areaId, ids: [ids[i]] });
+});
+
+test("MIPER: eliminar líneas con respaldo y restaurarlas (solo administrador)", async () => {
+  const crear = async (peligro) => (await H("admin", "miper_crear_linea", { area: "Oficina", actividad: "Prueba de eliminación", peligro, riesgo: "Golpe", probabilidad: 2, consecuencia: 2, simbolo_oficial: "seg-otros" })).datos.linea.id;
+  const a = await crear("Peligro a eliminar A"), b = await crear("Peligro a eliminar B");
+  // un perfil no administrador ni siquiera ve la herramienta
+  let r = await H("prevencionista", "miper_eliminar_lineas", { ids: [a], motivo: "Copia repetida" });
+  assert.equal(r.error, true);
+  assert.ok(!(await nombres("prevencionista")).has("miper_eliminar_lineas"));
+  // sin motivo, con un id inexistente o con plan de acción: no elimina ninguna
+  r = await H("admin", "miper_eliminar_lineas", { ids: [a] });
+  assert.match(r.texto, /motivo: es obligatorio/);
+  r = await H("admin", "miper_eliminar_lineas", { ids: [a, "no-existe"], motivo: "Copia repetida" });
+  assert.match(r.texto, /No existe la línea no-existe/);
+  r = await H("admin", "miper_eliminar_lineas", { ids: [a, "miper-1-andes"], motivo: "Copia repetida" });
+  assert.match(r.texto, /Plan de acción/);
+  assert.ok(await registro("prueba-andes", "matriz", a));
+  // eliminar
+  const antes = await registro("prueba-andes", "matriz", a);
+  r = await H("admin", "miper_eliminar_lineas", { ids: [a, b], motivo: "No aplica a la actividad" });
+  assert.equal(r.error, false, r.texto);
+  assert.equal(r.datos.eliminadas.length, 2);
+  assert.equal(await registro("prueba-andes", "matriz", a), null);
+  const aud = (await auditoria("registro_id=$1 AND operacion='eliminar'", [a])).pop();
+  assert.deepEqual(aud.valor_anterior, antes);
+  assert.equal(aud.valor_nuevo.motivo, "No aplica a la actividad");
+  // otra empresa no puede restaurar ni ve la eliminación
+  r = await H("sur", "miper_restaurar_linea", { id: a });
+  assert.match(r.texto, /No hay una eliminación/);
+  // restaurar deja la línea exactamente igual
+  r = await H("admin", "miper_restaurar_linea", { id: a });
+  assert.equal(r.error, false, r.texto);
+  assert.deepEqual(await registro("prueba-andes", "matriz", a), antes);
+  assert.equal((await auditoria("registro_id=$1", [a])).pop().operacion, "restaurar");
+  r = await H("admin", "miper_restaurar_linea", { id: a });
+  assert.match(r.texto, /ya está en la matriz/);
 });
 
 test("Plan de acción: crear (riesgo Medio o más), grupo, estado y cumplimiento con reevaluación del residual", async () => {
@@ -547,8 +584,9 @@ test("Auditoría: cada escritura del conector quedó registrada y solo el admin 
   }
   assert.ok(aud.every((a) => a.usuario_id && a.momento && a.store && a.registro_id && a.valor_nuevo && a.client_id));
   // Toda fila de records escrita por el conector tiene su auditoría
-  const { rows } = await pool.query(`SELECT count(*)::int n FROM auditoria_escrituras a LEFT JOIN records r ON r.company_id=a.company_id AND r.store=a.store AND r.id=a.registro_id WHERE r.id IS NULL`);
-  assert.equal(rows[0].n, 0, "no hay auditorías de registros inexistentes (nada se borró)");
+  const { rows } = await pool.query(`SELECT count(*)::int n FROM auditoria_escrituras a LEFT JOIN records r ON r.company_id=a.company_id AND r.store=a.store AND r.id=a.registro_id WHERE r.id IS NULL
+    AND NOT EXISTS (SELECT 1 FROM auditoria_escrituras e WHERE e.company_id=a.company_id AND e.store=a.store AND e.registro_id=a.registro_id AND e.operacion='eliminar' AND e.herramienta='miper_eliminar_lineas')`);
+  assert.equal(rows[0].n, 0, "no faltan registros salvo los eliminados con respaldo por miper_eliminar_lineas");
   const r = await H("admin", "auditoria_listar", { store: "matriz", limite: 5, incluir_valores: true });
   assert.ok(r.datos.length > 0 && r.datos[0].valor_nuevo);
   assert.match(r.datos[0].momento, /^\d{4}-\d{2}-\d{2}T/, "la fecha de la auditoría se muestra");
