@@ -40,7 +40,7 @@ test("OAuth: descubrimiento RFC 9728 / RFC 8414 y 401 con WWW-Authenticate", asy
   assert.equal(as.registration_endpoint, base + "/oauth/register");
   const r = await A.rpc(base, "token-falso", "initialize", {});
   assert.equal(r.status, 401);
-  assert.match(r.headers.get("www-authenticate"), /resource_metadata=".*\/\.well-known\/oauth-protected-resource"/);
+  assert.match(r.headers.get("www-authenticate"), /resource_metadata=".*\/\.well-known\/oauth-protected-resource\/mcp"/);
 });
 
 test("OAuth: registro dinámico solo acepta las URL de retorno permitidas", async () => {

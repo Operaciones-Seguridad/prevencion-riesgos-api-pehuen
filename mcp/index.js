@@ -5,7 +5,7 @@
 
 const { crearOAuth } = require("./oauth");
 const { crearProtocolo, rpcErr } = require("./protocolo");
-const { construirContexto } = require("./contexto");
+const { construirContexto, empresaCalzaAlias, slugEmpresa } = require("./contexto");
 const { crearDatos } = require("./datos");
 
 // 14 MB: alcanza para el máximo de fotos por llamada de la investigación de
@@ -35,8 +35,14 @@ function crearConector(deps) {
     const ruta = url.pathname.replace(/\/+$/, "") || "/";
     try {
       // --- descubrimiento ---
-      if (req.method === "GET" && (ruta === "/.well-known/oauth-protected-resource" || ruta === "/.well-known/oauth-protected-resource/mcp")) return json(res, 200, oauth.metadatosRecurso(req)), true;
-      if (req.method === "GET" && (ruta === "/.well-known/oauth-authorization-server" || ruta === "/.well-known/oauth-authorization-server/mcp")) return json(res, 200, oauth.metadatosServidor(req)), true;
+      // Recurso protegido de /mcp o de /mcp/<alias> (RFC 9728: la ruta del recurso va como sufijo).
+      const mPR = /^\/\.well-known\/oauth-protected-resource(?:\/mcp(?:\/([^/]+))?)?$/.exec(ruta);
+      if (req.method === "GET" && mPR) {
+        const alias = mPR[1] ? mPR[1].toLowerCase() : null;
+        if (alias && !oauth.ALIAS_RE.test(alias)) return false;
+        return json(res, 200, oauth.metadatosRecurso(req, alias)), true;
+      }
+      if (req.method === "GET" && /^\/\.well-known\/oauth-authorization-server(?:\/mcp(?:\/[^/]+)?)?$/.test(ruta)) return json(res, 200, oauth.metadatosServidor(req)), true;
 
       // --- OAuth ---
       if (ruta === "/oauth/register" && req.method === "POST") {
@@ -58,15 +64,25 @@ function crearConector(deps) {
       }
 
       // --- MCP ---
-      if (ruta === "/mcp") {
+      // /mcp (elige empresa al conectar) o /mcp/<alias> (una empresa fija).
+      // Cualquier alias con formato válido responde igual hasta autenticarse,
+      // para no revelar qué empresas existen.
+      const mMcp = /^\/mcp(?:\/([^/]+))?$/.exec(ruta);
+      const aliasMcp = mMcp && mMcp[1] ? mMcp[1].toLowerCase() : null;
+      if (mMcp && (!aliasMcp || oauth.ALIAS_RE.test(aliasMcp))) {
         const origen = req.headers.origin;
         if (origen && !origenesPermitidos.includes(origen)) return json(res, 403, rpcErr(null, -32000, "Origen no permitido.")), true;
         if (req.method !== "POST") { res.writeHead(405, { Allow: "POST" }); res.end(); return true; }
         const token = (/^Bearer\s+(.+)$/i.exec(req.headers.authorization || "") || [])[1];
-        const t = await oauth.verificarAcceso(req, token);
-        const ctx = t ? await construirContexto(pool, dbGetEmpresa, t) : null;
+        const t = await oauth.verificarAcceso(req, token, aliasMcp);
+        let ctx = t ? await construirContexto(pool, dbGetEmpresa, t) : null;
+        if (ctx && aliasMcp && !empresaCalzaAlias(ctx.empresa, aliasMcp)) ctx = null; // doble resguardo
+        if (ctx) {
+          ctx.urlConector = oauth.recursoUrl(req, aliasMcp);
+          ctx.urlDirectaEmpresa = oauth.recursoUrl(req, slugEmpresa(ctx.empresa.nombre));
+        }
         if (!ctx) {
-          res.setHeader("WWW-Authenticate", `Bearer resource_metadata="${oauth.baseUrl(req)}/.well-known/oauth-protected-resource"${token ? ', error="invalid_token"' : ""}`);
+          res.setHeader("WWW-Authenticate", `Bearer resource_metadata="${oauth.baseUrl(req)}/.well-known/oauth-protected-resource/mcp${aliasMcp ? "/" + aliasMcp : ""}"${token ? ', error="invalid_token"' : ""}`);
           return json(res, 401, rpcErr(null, -32001, "Autenticación requerida.")), true;
         }
         const c = await leerCuerpo(req);
