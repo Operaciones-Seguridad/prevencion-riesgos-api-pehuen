@@ -4,7 +4,8 @@
   "description": "Backend real (API + autenticacion) para la app de Prevencion de Riesgos de Pehuen.",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test --test-concurrency=1 \"test/*.test.js\""
   },
   "engines": {
     "node": ">=18.0.0"

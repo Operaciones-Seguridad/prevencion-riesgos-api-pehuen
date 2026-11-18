@@ -1,0 +1,418 @@
+{
+ "_origen": "Copiado de index.html (app prevencion-riesgos-app-pehuen): ANEXO1_SIMBOLOS (sin iconos), JERARQUIA_DS44 y catálogos base. Si la app cambia estas constantes, regenerar con scripts/extraer-catalogos-app.js.",
+ "ANEXO1_SIMBOLOS": [
+  {
+   "id": "seg-caida-mismo-nivel",
+   "tipo": "seguridad",
+   "familia": "Caída de personas",
+   "nombres": [
+    "Caídas al mismo nivel"
+   ],
+   "requiereEspecificar": false
+  },
+  {
+   "id": "seg-caida-distinto-nivel",
+   "tipo": "seguridad",
+   "familia": "Caída de personas",
+   "nombres": [
+    "Caídas a distinto nivel"
+   ],
+   "requiereEspecificar": false
+  },
+  {
+   "id": "seg-caida-altura",
+   "tipo": "seguridad",
+   "familia": "Caída de personas",
+   "nombres": [
+    "Caídas de altura"
+   ],
+   "requiereEspecificar": false
+  },
+  {
+   "id": "seg-caida-agua",
+   "tipo": "seguridad",
+   "familia": "Caída de personas",
+   "nombres": [
+    "Caídas al agua"
+   ],
+   "requiereEspecificar": false
+  },
+  {
+   "id": "seg-cortes",
+   "tipo": "seguridad",
+   "familia": "Contacto con objetos",
+   "nombres": [
+    "Cortes por objetos / herramientas corto-punzantes"
+   ],
+   "requiereEspecificar": false
+  },
+  {
+   "id": "seg-atrapamiento",
+   "tipo": "seguridad",
+   "familia": "Contacto con objetos",
+   "nombres": [
+    "Atrapamiento"
+   ],
+   "requiereEspecificar": false
+  },
+  {
+   "id": "seg-caida-objetos",
+   "tipo": "seguridad",
+   "familia": "Contacto con objetos",
+   "nombres": [
+    "Caída de objetos"
+   ],
+   "requiereEspecificar": false
+  },
+  {
+   "id": "seg-choque-objetos",
+   "tipo": "seguridad",
+   "familia": "Contacto con objetos",
+   "nombres": [
+    "Choque contra objetos"
+   ],
+   "requiereEspecificar": false
+  },
+  {
+   "id": "seg-contacto-personas",
+   "tipo": "seguridad",
+   "familia": "Contacto con seres vivos",
+   "nombres": [
+    "Contacto con personas"
+   ],
+   "requiereEspecificar": false
+  },
+  {
+   "id": "seg-contacto-animales",
+   "tipo": "seguridad",
+   "familia": "Contacto con seres vivos",
+   "nombres": [
+    "Contacto con animales y/o insectos"
+   ],
+   "requiereEspecificar": false
+  },
+  {
+   "id": "seg-termico",
+   "tipo": "seguridad",
+   "familia": "Contactos térmicos",
+   "nombres": [
+    "Contactos térmicos por calor",
+    "Contactos térmicos por frío"
+   ],
+   "requiereEspecificar": true
+  },
+  {
+   "id": "seg-electrico",
+   "tipo": "seguridad",
+   "familia": "Contacto con energía eléctrica",
+   "nombres": [
+    "Contactos eléctricos directos baja tensión",
+    "Contactos eléctricos directos alta tensión",
+    "Contactos eléctricos indirectos baja tensión",
+    "Contactos eléctricos indirectos alta tensión"
+   ],
+   "requiereEspecificar": true
+  },
+  {
+   "id": "seg-quimico",
+   "tipo": "seguridad",
+   "familia": "Contacto con sustancias químicas",
+   "nombres": [
+    "Contacto con sustancias cáusticas y/o corrosivas",
+    "Contacto con otras sustancias químicas"
+   ],
+   "requiereEspecificar": true
+  },
+  {
+   "id": "seg-proyeccion",
+   "tipo": "seguridad",
+   "familia": "Contacto con elementos que se proyectan",
+   "nombres": [
+    "Explosiones",
+    "Proyección de fragmentos y/o partículas"
+   ],
+   "requiereEspecificar": true
+  },
+  {
+   "id": "seg-vehiculos",
+   "tipo": "seguridad",
+   "familia": "Contacto con/en vehículos en movimiento",
+   "nombres": [
+    "Atropellos o golpes con vehículos",
+    "Choque, colisión o volcamiento"
+   ],
+   "requiereEspecificar": true
+  },
+  {
+   "id": "seg-incendios",
+   "tipo": "seguridad",
+   "familia": "Incendios",
+   "nombres": [
+    "Incendios"
+   ],
+   "requiereEspecificar": false
+  },
+  {
+   "id": "seg-deficiencia-oxigeno",
+   "tipo": "seguridad",
+   "familia": "Exposición a condiciones atmosféricas extremas",
+   "nombres": [
+    "Exposición a ambientes con deficiencia de oxígeno"
+   ],
+   "requiereEspecificar": false
+  },
+  {
+   "id": "seg-quimicos-toxicos",
+   "tipo": "seguridad",
+   "familia": "Exposición a condiciones atmosféricas extremas",
+   "nombres": [
+    "Exposición a sustancias químicas tóxicas"
+   ],
+   "requiereEspecificar": false
+  },
+  {
+   "id": "seg-ingesta",
+   "tipo": "seguridad",
+   "familia": "Otros riesgos",
+   "nombres": [
+    "Ingesta de sustancias nocivas"
+   ],
+   "requiereEspecificar": false
+  },
+  {
+   "id": "seg-otros",
+   "tipo": "seguridad",
+   "familia": "Otros riesgos",
+   "nombres": [
+    "Otros riesgos"
+   ],
+   "requiereEspecificar": false
+  },
+  {
+   "id": "hig-aerosoles-solidos",
+   "tipo": "higienico",
+   "familia": "Exposición a agentes químicos",
+   "nombres": [
+    "Exposición a aerosoles sólidos"
+   ],
+   "requiereEspecificar": true
+  },
+  {
+   "id": "hig-aerosoles-liquidos",
+   "tipo": "higienico",
+   "familia": "Exposición a agentes químicos",
+   "nombres": [
+    "Exposición a aerosoles líquidos"
+   ],
+   "requiereEspecificar": true
+  },
+  {
+   "id": "hig-gases-vapores",
+   "tipo": "higienico",
+   "familia": "Exposición a agentes químicos",
+   "nombres": [
+    "Exposición a gases y vapores"
+   ],
+   "requiereEspecificar": true
+  },
+  {
+   "id": "hig-ruido",
+   "tipo": "higienico",
+   "familia": "Exposición a agentes físicos",
+   "nombres": [
+    "Exposición a ruido"
+   ],
+   "requiereEspecificar": true
+  },
+  {
+   "id": "hig-vibraciones",
+   "tipo": "higienico",
+   "familia": "Exposición a agentes físicos",
+   "nombres": [
+    "Exposición a vibraciones"
+   ],
+   "requiereEspecificar": true
+  },
+  {
+   "id": "hig-calor",
+   "tipo": "higienico",
+   "familia": "Exposición a agentes físicos",
+   "nombres": [
+    "Exposición a calor"
+   ],
+   "requiereEspecificar": false
+  },
+  {
+   "id": "hig-radiacion-no-ionizante",
+   "tipo": "higienico",
+   "familia": "Exposición a agentes físicos",
+   "nombres": [
+    "Exposición a radiaciones no ionizantes"
+   ],
+   "requiereEspecificar": false
+  },
+  {
+   "id": "hig-radiacion-ionizante",
+   "tipo": "higienico",
+   "familia": "Exposición a agentes físicos",
+   "nombres": [
+    "Exposición a radiaciones ionizantes"
+   ],
+   "requiereEspecificar": false
+  },
+  {
+   "id": "hig-frio",
+   "tipo": "higienico",
+   "familia": "Exposición a agentes físicos",
+   "nombres": [
+    "Exposición a frío"
+   ],
+   "requiereEspecificar": false
+  },
+  {
+   "id": "hig-altas-presiones",
+   "tipo": "higienico",
+   "familia": "Exposición a agentes físicos",
+   "nombres": [
+    "Exposición a altas presiones"
+   ],
+   "requiereEspecificar": false
+  },
+  {
+   "id": "hig-bajas-presiones",
+   "tipo": "higienico",
+   "familia": "Exposición a agentes físicos",
+   "nombres": [
+    "Exposición a bajas presiones"
+   ],
+   "requiereEspecificar": false
+  },
+  {
+   "id": "hig-biologico",
+   "tipo": "higienico",
+   "familia": "Exposición a peligros biológicos",
+   "nombres": [
+    "Transmisión por fluidos corporales",
+    "Transmisión por inhalación dermal, oral y parenteral"
+   ],
+   "requiereEspecificar": true
+  },
+  {
+   "id": "musc-general",
+   "tipo": "musculo",
+   "familia": "Riesgo músculo-esquelético",
+   "nombres": [
+    "Manejo o manipulación manual de carga (MMC) o personas/pacientes (MMP)",
+    "Trabajo repetitivo de miembros superiores",
+    "Posturas forzadas",
+    "Posturas estáticas"
+   ],
+   "requiereEspecificar": true
+  },
+  {
+   "id": "psico-general",
+   "tipo": "psicosocial",
+   "familia": "Riesgos psicosociales",
+   "nombres": [
+    "Riesgos psicosociales"
+   ],
+   "requiereEspecificar": false
+  }
+ ],
+ "JERARQUIA_DS44": [
+  {
+   "code": "A",
+   "label": "Eliminación"
+  },
+  {
+   "code": "B",
+   "label": "Sustitución"
+  },
+  {
+   "code": "C",
+   "label": "Control de ingeniería"
+  },
+  {
+   "code": "D",
+   "label": "Control administrativo"
+  },
+  {
+   "code": "E",
+   "label": "Elementos de protección personal (EPP)"
+  }
+ ],
+ "CATALOG_BASE": {
+  "proceso": [
+   "ADMINISTRATIVO",
+   "ALMACEN",
+   "LIMPIEZA Y ASEO",
+   "OBRAS Y OPERACIONES"
+  ],
+  "actividad": [],
+  "categoria": [
+   "Biológico",
+   "Eléctrico",
+   "Emergencias",
+   "Ergonómico",
+   "Físico",
+   "Mecánico",
+   "Psicosociales",
+   "Químico"
+  ],
+  "peligro": [
+   "Atropello",
+   "Atrapamiento",
+   "Aplastamiento",
+   "Atentados",
+   "Asalto",
+   "Caída a distinto nivel",
+   "Caída a mismo nivel",
+   "Contacto elementos cortantes/punzantes",
+   "Contacto superficies calientes",
+   "Contacto eléctrico c/elementos energizados",
+   "Contacto  productos químicos",
+   "Choque / Colisión",
+   "Derrame Productos químicos",
+   "Electricidad estática",
+   "Estrés laboral",
+   "Espacio confinado",
+   "Exposición a ruido",
+   "Exposición a vibraciones",
+   "Exposición partículas en suspensión o fluidos",
+   "Exposición a gases o vapores químicos",
+   "Exposición a radiaciones ionizantes",
+   "Exposición a radiaciones no ionizantes",
+   "Exp. Insuficiencia de iluminación",
+   "Exposición a Tª extremas",
+   "Exposición radiación ultravioleta",
+   "Exposición arco eléctrico",
+   "Explosiones",
+   "Fugas radiactivas",
+   "Mordedura",
+   "Heridas cortantes",
+   "Golpeado por/contra",
+   "Incendios",
+   "Desechos Orgánicos",
+   "Incendio eléctrico",
+   "Inundaciones/ Otros",
+   "Manejo manual  de cargas",
+   "Movimiento repetitivos",
+   "Proyección de partículas",
+   "Riesgos de fuerza mayor (Terremotos, temporales)",
+   "Robo",
+   "Riesgos posturales/sobreesfuerzos",
+   "Inmersión",
+   "Riesgo biológico, hongos, virus hanta, litre",
+   "Sobreesfuerzo",
+   "Trabajo en condiciones de emergencia",
+   "Volcamiento",
+   "Otros (especificar)"
+  ],
+  "capTipo": [
+   "Inducción",
+   "Específica por riesgo del puesto",
+   "Obligatoria DS 44",
+   "Refuerzo / recapacitación"
+  ]
+ }
+}
