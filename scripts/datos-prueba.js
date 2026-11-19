@@ -31,7 +31,7 @@ function construirEmpresas(hoy, hashClave) {
     const p = (x) => `${x}-${sufijo}`;
     const perfiles = [
       { id: p("perfil-admin"), nombre: "Administrador", esAdmin: true, vistas: ["dashboard", "matriz", "programa", "capacitacion", "documentos", "config"] },
-      { id: p("perfil-prev"), nombre: "Prevencionista de Riesgos", esAdmin: false, vistas: ["dashboard", "matriz", "programa", "capacitacion", "documentos", "cumplimiento", "accidentabilidad"] },
+      { id: p("perfil-prev"), nombre: "Prevencionista de Riesgos", esAdmin: false, vistas: ["dashboard", "matriz", "programa", "capacitacion", "documentos", "cumplimiento", "accidentabilidad", "riohys"] },
       { id: p("perfil-sup"), nombre: "Jefe de Obra / Supervisor", esAdmin: false, vistas: ["dashboard", "realizar-inspecciones", "inspecciones", "matriz", "programa", "capacitacion", "accidentabilidad", "emergencia", "compromisos"] },
       { id: p("perfil-trab"), nombre: "Trabajador", esAdmin: false, descargaDashboard: false, vistas: ["dashboard", "realizar-inspecciones"] },
       { id: p("perfil-cap"), nombre: "Encargada de capacitación", esAdmin: false, puedeAceptarRiesgos: false, vistas: ["capacitacion"] },
@@ -106,6 +106,15 @@ function construirEmpresas(hoy, hashClave) {
       { id: p("tc-2"), trabajadorId: p("trab-2"), cursoId: p("curso-general"), fechaAprobacion: d(-700), fechaVencimiento: d(30), certificadoNombre: null, certificadoData: null, fechaCreacion: new Date().toISOString() },
       { id: p("tc-3"), trabajadorId: p("trab-3"), cursoId: p("curso-general"), fechaAprobacion: d(-100), fechaVencimiento: d(630), certificadoNombre: "certificado.pdf", certificadoData: "data:application/pdf;base64," + "A".repeat(400), fechaCreacion: new Date().toISOString() },
     ];
+    // Documentos del trabajador (carpeta del conductor): uno renovado (con historial), uno por vencer, uno vencido y uno que no vence.
+    const td = (n, extra) => Object.assign({ id: p("td-" + n), trabajadorId: p("trab-6"), entidad: "Mandante Ficticio", observacion: "", archivoNombre: null, archivoData: null, reemplazaA: null, reemplazadoPor: null, fechaCreacion: new Date().toISOString() }, extra);
+    const trabajadorDocumentos = [
+      td(1, { nombre: "Licencia de conducir A3/A5", fechaControl: d(-1500), fechaVencimiento: d(-400), reemplazadoPor: p("td-2") }),
+      td(2, { nombre: "Licencia de conducir A3/A5", fechaControl: d(-400), fechaVencimiento: d(1060), reemplazaA: p("td-1"), archivoNombre: "licencia.pdf", archivoData: "data:application/pdf;base64," + "B".repeat(400) }),
+      td(3, { nombre: "Examen ocupacional conductor", fechaControl: d(-340), fechaVencimiento: d(25) }),
+      td(4, { nombre: "Curso de manejo defensivo", fechaControl: d(-740), fechaVencimiento: d(-10) }),
+      td(5, { nombre: "Contrato", entidad: "", fechaControl: d(-200), fechaVencimiento: null }),
+    ];
     const doc = (n, tipo, nombre, version, extra) => Object.assign({ id: p("doc-" + n), tipo, subtipo: tipo === "procedimiento" ? "procedimiento" : null, nombre, version, fechaConfeccion: d(-400), fechaRevision: "", fechaActualizacion: d(-400), descripcion: "Documento de prueba", responsableElaboracion: "Pía Prevención Ficticia", responsableRevision: "", responsableAprobacion: "Ada Prueba Admin", observaciones: "", contenido: "Contenido de prueba.", archivoNombre: null, archivoData: null }, extra);
     const documentos = [
       doc(1, "politica", "Política de SST", "1", { fechaActualizacion: d(-500) }),
@@ -123,7 +132,7 @@ function construirEmpresas(hoy, hashClave) {
       id, nombre, stores: {
         empresa: [{ id: "empresa-1", razonSocial: nombre, rut: "76.000.000-0", rubro, numTrabajadores }],
         accesoPerfiles: perfiles, accesoUsuarios: usuarios, areas, trabajadores, programaPersonas, matriz, planAccionMatriz: plan,
-        programa, capacitaciones, cursosObligatorios, trabajadorCursos, documentos, matrizHistorial: [],
+        programa, capacitaciones, cursosObligatorios, trabajadorCursos, trabajadorDocumentos, documentos, matrizHistorial: [],
         accidentes, accInvestigaciones: [], arbolesCausales: [], transitoInvestigaciones: [],
       },
     };

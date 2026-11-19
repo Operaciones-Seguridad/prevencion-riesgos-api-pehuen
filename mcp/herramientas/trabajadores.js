@@ -34,7 +34,7 @@ module.exports = function herramientasTrabajadores(datos) {
     }),
     herramienta({
       name: "trabajador_detalle", title: "Trabajadores: detalle", permiso: PERMISOS.trabajadores_lectura,
-      description: "Datos de un trabajador; si el perfil ve Capacitación, también sus cursos obligatorios (estado de vigencia) y las capacitaciones en que participa. Devuelve _version.",
+      description: "Datos de un trabajador; si el perfil ve Capacitación, también sus cursos obligatorios (estado de vigencia) y las capacitaciones en que participa; si ve Inducción y cumplimiento, sus documentos personales (versión actual y vencimiento). Devuelve _version.",
       inputSchema: { required: ["id"], properties: { id: { type: "string" } } },
       async run(ctx, a) {
         const t = await datos.leerUno(ctx.companyId, "trabajadores", a.id);
@@ -52,6 +52,12 @@ module.exports = function herramientasTrabajadores(datos) {
             const p = c.participantes.find((x) => x.trabajadorId === t.id);
             return { id: c.id, nombre: c.nombre, fechaProgramada: c.fechaProgramada, estado: O.estadoCapacitacion(c, hoy), asistio: !!p.asistio, aprobado: !!p.aprobado };
           });
+        }
+        if (ctx.ve("riohys")) {
+          const hoy = hoyIso();
+          out.documentos = O.docsTrabajadorActuales(await datos.leerTodos(ctx.companyId, "trabajadorDocumentos"), t.id)
+            .sort((x, y) => (x.nombre || "").localeCompare(y.nombre || ""))
+            .map((r) => ({ id: r.id, nombre: r.nombre, entidad: r.entidad || "", fechaControl: soloFecha(r.fechaControl), vence: soloFecha(r.fechaVencimiento), estado: O.DOC_TRAB_ESTADO_LABEL[O.estadoDocTrabajador(r, hoy)], archivo: r.archivoNombre || null }));
         }
         return out;
       },

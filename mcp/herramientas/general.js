@@ -10,6 +10,7 @@ const { PERMISOS } = require("../contexto");
 const MODULOS = [
   ["MIPER y Plan de acción", "matriz"], ["Programa de seguridad", "programa"], ["Capacitación", "capacitacion"],
   ["Control documental", "documentos"], ["Accidentabilidad y DS 67", "accidentabilidad"],
+  ["Documentos del trabajador (Inducción y cumplimiento)", "riohys"],
 ];
 
 module.exports = function herramientasGenerales(datos, pool) {
@@ -36,7 +37,7 @@ module.exports = function herramientasGenerales(datos, pool) {
     }),
     herramienta({
       name: "buscar", title: "Buscar en todos los módulos", permiso: PERMISOS.general,
-      description: "Busca un texto en MIPER, Plan de acción, Programa de seguridad, Capacitación, Control documental y Trabajadores (solo en los módulos que tu perfil puede ver). Devuelve hasta 10 coincidencias por módulo, con su id para pedir el detalle.",
+      description: "Busca un texto en MIPER, Plan de acción, Programa de seguridad, Capacitación, Control documental, Documentos del trabajador y Trabajadores (solo en los módulos que tu perfil puede ver). Devuelve hasta 10 coincidencias por módulo, con su id para pedir el detalle.",
       inputSchema: { required: ["texto"], properties: { texto: { type: "string", minLength: 2 } } },
       async run(ctx, a) {
         const q = a.texto, out = {};
@@ -51,6 +52,11 @@ module.exports = function herramientasGenerales(datos, pool) {
         if (PERMISOS.programa(ctx)) out.programa = top((await datos.leerTodos(ctx.companyId, "programa")).filter((p) => contieneTexto([p.nombre, p.responsable], q)).map((p) => ({ id: p.id, nombre: p.nombre, responsable: p.responsable, fechaProgramada: p.fechaProgramada })));
         if (PERMISOS.capacitacion(ctx)) out.capacitaciones = top((await datos.leerTodos(ctx.companyId, "capacitaciones")).filter((c) => contieneTexto([c.nombre, c.tipo, c.relator], q)).map((c) => ({ id: c.id, nombre: c.nombre, fechaProgramada: c.fechaProgramada, relator: c.relator })));
         if (PERMISOS.documentos(ctx)) out.documentos = top((await datos.leerTodos(ctx.companyId, "documentos")).filter((d) => contieneTexto([d.nombre, d.descripcion], q)).map((d) => ({ id: d.id, nombre: d.nombre, tipo: d.tipo, version: d.version })));
+        if (PERMISOS.induccion(ctx)) {
+          const tn = mapaPorId(await datos.leerTodos(ctx.companyId, "trabajadores"));
+          out.documentosTrabajador = top((await datos.leerTodos(ctx.companyId, "trabajadorDocumentos")).filter((r) => !r.reemplazadoPor && contieneTexto([r.nombre, r.entidad, r.observacion, (tn[r.trabajadorId] || {}).nombre], q))
+            .map((r) => ({ id: r.id, nombre: r.nombre, trabajador: (tn[r.trabajadorId] || {}).nombre || "—", entidad: r.entidad || "", vence: r.fechaVencimiento || null })));
+        }
         if (PERMISOS.trabajadores_lectura(ctx)) out.trabajadores = top((await datos.leerTodos(ctx.companyId, "trabajadores")).filter((t) => contieneTexto([t.nombre, t.rut, t.cargo], q)).map((t) => ({ id: t.id, nombre: t.nombre, cargo: t.cargo, area: (areas[t.areaId] || {}).nombre || "—" })));
         return out;
       },

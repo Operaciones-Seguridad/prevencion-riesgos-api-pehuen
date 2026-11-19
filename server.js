@@ -59,6 +59,7 @@ const STORES = [
   "transitoInvestigaciones", "programaPlantillas", "programaCargo", "programaPersonas", "programaConductual",
   "vsExpuestos", "vsCda", "vsEvaluaciones", "vsMovimientos", "matrizVersiones", "vsExamenesOcup",
   "objetivosGestion", "indicadoresGestion", "medidasIndicadores", "cphysComisiones", "compromisosAsesoria", "cphysInvestigaciones", "cphysDocumentos", "cphysChequeos", "cphysChequeoItems",
+  "trabajadorDocumentos",
 ];
 const STORES_SET = new Set(STORES);
 
