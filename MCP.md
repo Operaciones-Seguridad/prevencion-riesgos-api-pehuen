@@ -45,7 +45,7 @@ clientes por error. Quitar una empresa corta de inmediato sus conexiones.
   - Las tablas del conector se crean aparte, en `mcp/schema.sql`, protegidas con `try/catch`: si algo fallara al crearlas, la API arranca igual, solo que sin conector.
 - **Tokens propios:** los tokens del conector son distintos de los de sesión de la app y no sirven para `/api`, ni al revés.
 
-## Herramientas (59)
+## Herramientas (68)
 
 Ninguna herramienta elimina. Todas declaran `destructiveHint: false`, así que claude.ai pide confirmación antes de cada escritura.
 
@@ -91,8 +91,16 @@ Ninguna herramienta elimina. Todas declaran `destructiveHint: false`, así que c
   - `ds67_evaluacion`, `ds67_evaluacion_guardar`: calcula la evaluación como la app y guarda los datos que informa la mutualidad (factor y tasa de invalideces y muertes, corrección de días perdidos por período).
 - **Videos:** la app no guarda videos. Desde Claude Code se pueden extraer cuadros de un video y adjuntarlos como fotos de la investigación de tránsito; desde claude.ai, las fotos se adjuntan en la app.
 
+**Documentos del trabajador** (vista `riohys`, Inducción y cumplimiento)
+- Carpeta personal de cada trabajador con documentos de nombre libre (licencia, INIVIP, manejo defensivo, ficha de acreditación de un mandante…), entidad opcional, fecha de control y vencimiento opcional (sin fecha = no vence). Avisa 60 días antes, igual que la app. Solo controla lo registrado: no genera pendientes para quien no tiene un documento.
+- Lectura: `trabajador_documentos_listar` (versión actual; `incluir_historial` agrega las anteriores), `trabajador_documento_detalle`, `trabajador_documentos_por_vencer`
+- Escritura:
+  - `trabajador_documentos_registrar`: hasta 100 documentos por llamada, todo o nada. Rechaza un nombre que el trabajador ya tiene; para renovarlo se indica `renovar_id` y la versión anterior queda en el historial.
+  - `trabajador_documento_actualizar`: corrige datos; conserva el archivo.
+- Los archivos (PDF o foto) se adjuntan en la app; el conector nunca devuelve su contenido.
+
 **Trabajadores**
-- Lectura (cualquiera de los módulos anteriores o `config`): `trabajadores_listar`, `trabajador_detalle`
+- Lectura (cualquiera de los módulos anteriores, `riohys` o `config`): `trabajadores_listar`, `trabajador_detalle`
 - Escritura (solo vista `config`): `trabajador_crear`, `trabajador_actualizar`
 
 ### Reglas acordadas
@@ -140,7 +148,7 @@ La tabla está fuera de `records`, así que ninguna ruta de la app puede leerla 
 
 ## Pruebas
 ```bash
-npm test                     # 65 pruebas (unitarias + integración OAuth/MCP/permisos/módulos/auditoría)
+npm test                     # 76 pruebas (unitarias + integración OAuth/MCP/permisos/módulos/auditoría)
 node scripts/paridad-app.js ../prevencion-riesgos-app-pehuen/index.html [foto.jpg]   # paridad con la app real (Playwright)
 ```
 - **Base de datos:** las pruebas usan una base PostgreSQL **local** desechable (`postgres://pehuen_test:pehuen_test@localhost/pehuen_test`, o la de `TEST_DATABASE_URL`) que **se borra entera** en cada corrida. Por eso se niegan a correr si el servidor no es `localhost` o si el nombre de la base no contiene «test».
