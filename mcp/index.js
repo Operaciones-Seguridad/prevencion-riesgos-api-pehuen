@@ -25,6 +25,7 @@ function crearConector(deps) {
     ...require("./herramientas/documentos")(datos),
     ...require("./herramientas/accidentabilidad")(datos),
     ...require("./herramientas/ds67")(datos),
+    ...require("./herramientas/documentosTrabajador")(datos),
   ];
   const nombres = new Set();
   for (const h of herramientas) { if (nombres.has(h.name)) throw new Error("herramienta duplicada " + h.name); nombres.add(h.name); }

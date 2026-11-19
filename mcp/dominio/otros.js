@@ -169,6 +169,31 @@ function vencimientoDocumento(d, hoy = hoyIso()) {
   return { criterio: "12 meses desde la actualización", fechaLimite: limite, dias, vencido: dias < 0 };
 }
 
+// ===================== Documentos del trabajador =====================
+// Store "trabajadorDocumentos" (sección «Documentos del trabajador» de
+// Inducción y cumplimiento): docTrabEstado / docsTrabActuales /
+// docTrabHistorial de la app. La versión actual es la que no tiene
+// reemplazadoPor; sin fecha de vencimiento, el documento no vence.
+const DOC_TRAB_DIAS_AVISO = 60;
+const DOC_TRAB_ESTADO_LABEL = { vencido: "Vencido", proximo: "Próximo a vencer", vigente: "Vigente", sinvenc: "No vence" };
+function estadoDocTrabajador(r, hoy = hoyIso(), diasAviso = DOC_TRAB_DIAS_AVISO) {
+  if (!r || !r.fechaVencimiento) return "sinvenc";
+  const d = diasHasta(r.fechaVencimiento, hoy);
+  if (d < 0) return "vencido";
+  if (d <= diasAviso) return "proximo";
+  return "vigente";
+}
+function docsTrabajadorActuales(docs, trabajadorId) {
+  return (docs || []).filter((r) => !r.reemplazadoPor && (!trabajadorId || r.trabajadorId === trabajadorId));
+}
+function historialDocTrabajador(r, docs) {
+  const porId = new Map((docs || []).map((x) => [x.id, x]));
+  const out = [], vistos = new Set([r.id]);
+  let p = r.reemplazaA ? porId.get(r.reemplazaA) : null;
+  while (p && !vistos.has(p.id)) { out.push(p); vistos.add(p.id); p = p.reemplazaA ? porId.get(p.reemplazaA) : null; }
+  return out;
+}
+
 // ===================== Trabajadores =====================
 const ROLES_TRABAJADOR = { comite_paritario: "Comité paritario", delegado: "Delegado SST", prevencionista: "Prevencionista" };
 
@@ -177,5 +202,6 @@ module.exports = {
   estadoCapacitacion, cumplimientoCapacitacion, convocadosDe, sincronizarParticipantes, actualizarRealizada, tiposCapacitacion,
   tramoMinimoAplica, cursoAplica, ultimoCurso, estadoVencimientoCurso, CURSO_ESTADO_LABEL, fechaVencimientoCurso,
   DOC_TIPOS, DOC_SUBTIPOS, documentoKey, documentosVigentesMap, vencimientoDocumento, fechaVigenciaDoc,
+  DOC_TRAB_DIAS_AVISO, DOC_TRAB_ESTADO_LABEL, estadoDocTrabajador, docsTrabajadorActuales, historialDocTrabajador,
   ROLES_TRABAJADOR,
 };

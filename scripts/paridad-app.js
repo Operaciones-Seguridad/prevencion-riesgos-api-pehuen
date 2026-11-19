@@ -21,6 +21,7 @@ const { chromium } = require("playwright");
 const A = require("../test/ayudantes");
 const { construirEmpresas, insertar, hoyChile } = require("./datos-prueba");
 
+const hoyMas = (n) => { const d = new Date(hoyChile() + "T12:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
 const ok = (c, m) => { console.log((c ? "OK   " : "FALLA") + " " + m); if (!c) process.exitCode = 1; };
 
 (async () => {
@@ -132,6 +133,36 @@ const ok = (c, m) => { console.log((c ? "OK   " : "FALLA") + " " + m); if (!c) p
   ok(c && c.participantes.some((p) => p.asistio) && c.fechaRealizada && c.realizadaAuto === true, "Capacitación: marcar asistencia en la app sobre un registro del conector funciona (realizada automática)");
   const det = await H("capacitacion_detalle", { id: cap.capacitacion.id });
   ok(det.asistieron === 1 && det.estado === "realizada", "Conector: ve el cambio hecho desde la app");
+  // 4) Documentos del trabajador: lo registrado por el conector se ve, se edita (archivo) y se renueva en la app
+  const dialogos = [];
+  page.on("dialog", (dlg) => { dialogos.push(dlg.message()); dlg.accept(); });
+  const regDocs = await H("trabajador_documentos_registrar", { documentos: [
+    { trabajador_id: "trab-1-andes", nombre: "Paridad: INIVIP", entidad: "ENEX", fecha_control: "2026-05-15", fecha_vencimiento: "2028-05-15" },
+    { trabajador_id: "trab-1-andes", nombre: "Paridad: Examen ocupacional", entidad: "ENEX", fecha_control: "2025-12-01", fecha_vencimiento: hoyMas(20) },
+  ] });
+  await page.evaluate(async () => { marcarStoreSucio("trabajadorDocumentos"); await loadCache(); renderDocsTrabajador(); renderCumplimientoTrabajadores(); });
+  t = await ver("riohys");
+  ok(t.includes("Paridad: INIVIP") && t.includes("Paridad: Examen ocupacional"), "Documentos del trabajador: la app muestra lo registrado por el conector");
+  const filaExamen = page.locator("#docsTrabTable tr", { hasText: "Paridad: Examen ocupacional" });
+  ok((await filaExamen.textContent()).includes("Próximo a vencer"), "Documentos del trabajador: la app calcula el mismo estado (próximo a vencer)");
+  ok((await page.locator("#cumplimientoTrabTable tr", { hasText: "Ana Ejemplo Uno" }).textContent()).includes("por vencer"), "Cumplimiento de trabajadores: columna Documentos con el aviso");
+  const pdf = { name: "inivip.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4\n% paridad\n" + "x".repeat(400)) };
+  await page.locator("#docsTrabTable tr", { hasText: "Paridad: INIVIP" }).locator("[data-doctrab-editar]").click();
+  await page.setInputFiles("#docTrabArchivo", pdf);
+  await page.waitForTimeout(500);
+  await page.click("#docTrabGuardarBtn");
+  await page.waitForTimeout(2500);
+  const inivipId = regDocs.documentos[0].id;
+  const detInivip = await H("trabajador_documento_detalle", { id: inivipId });
+  ok(detInivip.archivo === "inivip.pdf" && detInivip.fechaVencimiento === "2028-05-15", "Documentos del trabajador: adjuntar el archivo en la app sobre un registro del conector conserva sus datos");
+  await page.locator("#docsTrabTable tr", { hasText: "Paridad: Examen ocupacional" }).locator("[data-doctrab-renovar]").click();
+  await page.fill("#docTrabFechaControl", "2026-11-19");
+  await page.fill("#docTrabFechaVenc", "2027-11-19");
+  await page.click("#docTrabGuardarBtn");
+  await page.waitForTimeout(2500);
+  const lst = await H("trabajador_documentos_listar", { trabajador_id: "trab-1-andes", texto: "Paridad: Examen", incluir_historial: true });
+  ok(lst.total === 1 && lst.resultados[0].fechaVencimiento === "2027-11-19" && lst.resultados[0].historial.length === 1 && lst.resultados[0].historial[0].id === regDocs.documentos[1].id, "Documentos del trabajador: renovar en la app deja la versión del conector en el historial");
+  ok(dialogos.some((m) => /renovado/.test(m)), "Documentos del trabajador: la app confirma la renovación");
   ok(errores.length === 0, "Sin errores de JavaScript en la app" + (errores.length ? ": " + errores.slice(0, 5).join(" | ") : ""));
   await browser.close();
   estatico.close(); await srv.detener(); await pool.end();

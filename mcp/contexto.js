@@ -67,6 +67,7 @@ async function construirContexto(pool, dbGetEmpresa, tokenRow) {
 //    Accidentabilidad (accidentes, incidentes e investigaciones) → "accidentabilidad".
 //  - Trabajadores: leer con cualquiera de esos módulos o "config";
 //    crear/actualizar solo con "config" (donde se administran en la app).
+//  - Documentos del trabajador → vista "riohys" (Inducción y cumplimiento).
 //  - esAdmin ve todo.
 const PERMISOS = {
   matriz: (c) => c.ve("matriz"),
@@ -74,9 +75,10 @@ const PERMISOS = {
   capacitacion: (c) => c.ve("capacitacion"),
   documentos: (c) => c.ve("documentos"),
   accidentabilidad: (c) => c.ve("accidentabilidad"),
-  trabajadores_lectura: (c) => ["matriz", "programa", "capacitacion", "documentos", "accidentabilidad", "config"].some((v) => c.ve(v)),
+  induccion: (c) => c.ve("riohys"),
+  trabajadores_lectura: (c) => ["matriz", "programa", "capacitacion", "documentos", "accidentabilidad", "riohys", "config"].some((v) => c.ve(v)),
   trabajadores_escritura: (c) => c.ve("config"),
-  general: (c) => ["matriz", "programa", "capacitacion", "documentos", "accidentabilidad", "config"].some((v) => c.ve(v)),
+  general: (c) => ["matriz", "programa", "capacitacion", "documentos", "accidentabilidad", "riohys", "config"].some((v) => c.ve(v)),
   admin: (c) => c.esAdmin,
 };
 
